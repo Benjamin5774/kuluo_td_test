@@ -4,3 +4,4 @@
 
 #include "CoreMinimal.h"
 
+SOKOBANDEMO_API DECLARE_LOG_CATEGORY_EXTERN(LogSokoban, Log, All);

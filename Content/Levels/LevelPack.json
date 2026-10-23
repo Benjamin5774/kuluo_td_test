@@ -1,0 +1,10 @@
+{
+	"name": "浮岛搬运行会",
+	"levels": [
+		"01_first_push.json",
+		"02_whole_row.json",
+		"03_turn_the_corner.json",
+		"04_two_slots.json",
+		"05_break_the_row.json"
+	]
+}
