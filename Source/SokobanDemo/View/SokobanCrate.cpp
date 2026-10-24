@@ -8,24 +8,22 @@
 
 ASokobanCrate::ASokobanCrate()
 {
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> SolidMaterialAsset(TEXT("/Game/Sokoban/Materials/M_SokobanSolid.M_SokobanSolid"));
-	SolidMaterial = SolidMaterialAsset.Object;
+	// A wooden crate from the Quaternius Medieval Village MegaKit (CC0); its material has Tint and Glow.
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CrateMesh(TEXT("/Game/Sokoban/Environment/Meshes/Prop_Crate.Prop_Crate"));
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	Mesh->SetupAttachment(VisualRoot);
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	Mesh->SetStaticMesh(CubeMesh.Object);
-	// The basic cube is 100 units wide with its pivot at the centre: sit a 78-unit crate on the floor.
-	Mesh->SetRelativeScale3D(FVector(0.78f));
-	Mesh->SetRelativeLocation(FVector(0.f, 0.f, 39.f));
+	Mesh->SetStaticMesh(CrateMesh.Object);
+	// Authored 1.08 m wide with its pivot on the ground: a 78-unit crate.
+	Mesh->SetRelativeScale3D(FVector(0.72f));
 }
 
 void ASokobanCrate::BeginPlay()
 {
 	Super::BeginPlay();
 
-	Material = Mesh->CreateDynamicMaterialInstance(0, SolidMaterial);
+	Material = Mesh->CreateDynamicMaterialInstance(0);
 	ApplyColor();
 }
 
@@ -41,9 +39,9 @@ void ASokobanCrate::SetOnGoal(bool bInOnGoal, bool bInstant)
 
 void ASokobanCrate::PaintLook(UPrimitiveComponent* Target) const
 {
-	if (UMaterialInstanceDynamic* Look = Target->CreateDynamicMaterialInstance(0, SolidMaterial))
+	if (UMaterialInstanceDynamic* Look = Target->CreateDynamicMaterialInstance(0, Mesh->GetMaterial(0)))
 	{
-		Look->SetVectorParameterValue(TEXT("Color"), Color);
+		Look->SetVectorParameterValue(TEXT("Tint"), Tint);
 		Look->SetScalarParameterValue(TEXT("Glow"), 0.f);
 	}
 }
@@ -58,7 +56,7 @@ void ASokobanCrate::ApplyColor()
 {
 	if (Material)
 	{
-		Material->SetVectorParameterValue(TEXT("Color"), bOnGoal ? OnGoalColor : Color);
+		Material->SetVectorParameterValue(TEXT("Tint"), bOnGoal ? OnGoalTint : Tint);
 		Material->SetScalarParameterValue(TEXT("Glow"), bOnGoal ? OnGoalGlow : 0.f);
 	}
 }

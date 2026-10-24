@@ -7,7 +7,6 @@
 #include "SokobanCrate.generated.h"
 
 class UMaterialInstanceDynamic;
-class UMaterialInterface;
 class UPrimitiveComponent;
 class UStaticMeshComponent;
 
@@ -36,19 +35,17 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Sokoban")
 	TObjectPtr<UStaticMeshComponent> Mesh;
 
-	/** Material with Color / Roughness / Glow parameters. */
+	/** Multiplies the crate's texture (the mesh material's Tint parameter). */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
-	TObjectPtr<UMaterialInterface> SolidMaterial;
+	FLinearColor Tint = FLinearColor(1.f, 1.f, 1.f);
 
+	/** Tint while resting on a goal: the wood warms up towards the goal's gold. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
-	FLinearColor Color = FLinearColor(0.3f, 0.11f, 0.03f);
-
-	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
-	FLinearColor OnGoalColor = FLinearColor(0.95f, 0.45f, 0.02f);
+	FLinearColor OnGoalTint = FLinearColor(1.35f, 1.05f, 0.55f);
 
 	/** Emissive strength while resting on a goal. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
-	float OnGoalGlow = 0.6f;
+	float OnGoalGlow = 0.45f;
 
 private:
 	void ApplyColor();

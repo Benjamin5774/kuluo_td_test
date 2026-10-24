@@ -8,6 +8,7 @@
 #include "SokobanHero.generated.h"
 
 class UAnimSequenceBase;
+class USkeletalMesh;
 class USkeletalMeshComponent;
 
 /** What the hero is doing, used to pick a clip from the action library. */
@@ -20,7 +21,7 @@ enum class ESokobanHeroAction : uint8
 	Victory
 };
 
-/** The playable hero (the strongman for now). */
+/** The playable hero: the strongman, who shoves a whole row of crates. */
 UCLASS()
 class SOKOBANDEMO_API ASokobanHero : public ASokobanPiece
 {
@@ -43,12 +44,22 @@ public:
 	/** Clip registered for Action, or null. */
 	UAnimSequenceBase* GetActionClip(ESokobanHeroAction Action) const { return ActionClips.FindRef(Action); }
 
+	/**
+	 * Gives Body (this hero's own, or the board preview's stand-in) a follower component per attached part.
+	 * Components made in OnConstruction pass UserConstructionScript, so a rerun clears them.
+	 */
+	void AddPartsTo(USkeletalMeshComponent* Body, EComponentCreationMethod CreationMethod) const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void OnMoveFinished() override;
 
 	UPROPERTY(VisibleAnywhere, Category = "Sokoban")
 	TObjectPtr<USkeletalMeshComponent> Mesh;
+
+	/** Meshes skinned to the body's skeleton (beard, hair); they follow the body's pose. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
+	TArray<TObjectPtr<USkeletalMesh>> AttachedParts;
 
 	/** Action library: the clip each action plays. Actions without a clip fall back to Idle. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Animation")
@@ -62,7 +73,11 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Animation")
 	TMap<ESokobanHeroAction, float> ActionLeans;
 
-	/** How quickly the body eases into and out of a lean. */
+	/** How far forward the body shifts per action (so pushing hands meet the crate); 0 when missing. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Animation")
+	TMap<ESokobanHeroAction, float> ActionReaches;
+
+	/** How quickly the body eases into and out of a lean or reach. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Animation")
 	float LeanSpeed = 12.f;
 
@@ -77,6 +92,7 @@ protected:
 private:
 	float TargetYaw = 0.f;
 	float CurrentLean = 0.f;
+	float CurrentReach = 0.f;
 	ESokobanHeroAction CurrentAction = ESokobanHeroAction::Idle;
 	bool bHasAction = false;
 	float IdleCountdown = -1.f;

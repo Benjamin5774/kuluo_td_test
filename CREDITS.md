@@ -4,10 +4,22 @@
 
 | 资源 | 作者 | 授权 | 在项目中的位置 |
 |---|---|---|---|
-| KayKit – Character Pack: Adventurers 2.0（Barbarian 模型与贴图） | Kay Lousberg（www.kaylousberg.com） | CC0 1.0 | `Content/Sokoban/Characters/Barbarian` |
-| KayKit – Character Animations 1.1（Rig_Medium：General、MovementBasic、Simulation） | Kay Lousberg | CC0 1.0 | `Content/Sokoban/Characters/Animations` |
+| Universal Base Characters（Superhero 男性体型，络腮胡与寸头发型） | Quaternius（quaternius.com） | CC0 1.0 | `Content/Sokoban/Characters/Strongman` |
+| Universal Animation Library（Idle、Walk、Jog、Push、Dance、Hit） | Quaternius | CC0 1.0 | `Content/Sokoban/Characters/Strongman/Animations` |
+
+## 场景
+
+| 资源 | 作者 | 授权 | 在项目中的位置 |
+|---|---|---|---|
+| Stylized Nature MegaKit（石板、岩石、卵石、灌木、草、花、蘑菇、树及其贴图） | Quaternius | CC0 1.0 | `Content/Sokoban/Environment` |
+| Medieval Village MegaKit（木箱，WoodTrim 贴图，地形噪声贴图） | Quaternius | CC0 1.0 | `Content/Sokoban/Environment` |
 
 CC0 不要求署名，这里仍然列出以示感谢。
+
+## 项目自制
+
+- 材质：`Content/Sokoban/Materials` 下的 M_SokobanSolid、M_SokobanCharacter、M_SokobanProp、M_SokobanFoliage、M_SokobanTerrain、M_SokobanWater。
+- 水面波纹法线贴图 T_WaterRipples_N：由脚本按正弦波叠加生成。
 
 ## 引擎自带内容
 

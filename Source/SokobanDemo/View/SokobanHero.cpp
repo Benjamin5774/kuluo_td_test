@@ -9,11 +9,15 @@
 
 ASokobanHero::ASokobanHero()
 {
-	// The strongman: KayKit Barbarian (CC0, Kay Lousberg) with clips from KayKit Character Animations.
-	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BarbarianMesh(TEXT("/Game/Sokoban/Characters/Barbarian/Barbarian.Barbarian"));
-	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> IdleClip(TEXT("/Game/Sokoban/Characters/Animations/Rig_Medium_General_Idle_A.Rig_Medium_General_Idle_A"));
-	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> WalkClip(TEXT("/Game/Sokoban/Characters/Animations/Rig_Medium_MovementBasic_Walking_A.Rig_Medium_MovementBasic_Walking_A"));
-	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> CheerClip(TEXT("/Game/Sokoban/Characters/Animations/Rig_Medium_Simulation_Cheering.Rig_Medium_Simulation_Cheering"));
+	// The strongman: the Superhero male from Quaternius' Universal Base Characters (CC0) with a beard and
+	// buzzed hair, animated with clips from the Universal Animation Library (CC0), all on one skeleton.
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BodyMesh(TEXT("/Game/Sokoban/Characters/Strongman/Superhero_Male_FullBody.Superhero_Male_FullBody"));
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BeardMesh(TEXT("/Game/Sokoban/Characters/Strongman/Hair/Hair_Beard.Hair_Beard"));
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> HairMesh(TEXT("/Game/Sokoban/Characters/Strongman/Hair/Hair_Buzzed.Hair_Buzzed"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> IdleClip(TEXT("/Game/Sokoban/Characters/Strongman/Animations/Idle_Loop.Idle_Loop"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> WalkClip(TEXT("/Game/Sokoban/Characters/Strongman/Animations/Jog_Fwd_Loop.Jog_Fwd_Loop"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> PushClip(TEXT("/Game/Sokoban/Characters/Strongman/Animations/Push_Loop.Push_Loop"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> VictoryClip(TEXT("/Game/Sokoban/Characters/Strongman/Animations/Dance_Loop.Dance_Loop"));
 
 	Mesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("Mesh"));
 	Mesh->SetupAttachment(VisualRoot);
@@ -21,10 +25,19 @@ ASokobanHero::ASokobanHero()
 	Mesh->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 	// The model faces +Y; turn it so the actor's forward (+X) is the hero's front.
 	Mesh->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
-	Mesh->SetRelativeScale3D(FVector(0.55f));
-	if (BarbarianMesh.Succeeded())
+	// 1.82 m tall as imported: a bit over a cell high, so the broad build reads from the high camera.
+	Mesh->SetRelativeScale3D(FVector(0.72f));
+	if (BodyMesh.Succeeded())
 	{
-		Mesh->SetSkeletalMeshAsset(BarbarianMesh.Object);
+		Mesh->SetSkeletalMeshAsset(BodyMesh.Object);
+	}
+	if (BeardMesh.Succeeded())
+	{
+		AttachedParts.Add(BeardMesh.Object);
+	}
+	if (HairMesh.Succeeded())
+	{
+		AttachedParts.Add(HairMesh.Object);
 	}
 
 	if (IdleClip.Succeeded())
@@ -34,21 +47,48 @@ ASokobanHero::ASokobanHero()
 	if (WalkClip.Succeeded())
 	{
 		ActionClips.Add(ESokobanHeroAction::Walk, WalkClip.Object);
-		ActionClips.Add(ESokobanHeroAction::Push, WalkClip.Object);
 	}
-	if (CheerClip.Succeeded())
+	if (PushClip.Succeeded())
 	{
-		ActionClips.Add(ESokobanHeroAction::Victory, CheerClip.Object);
+		ActionClips.Add(ESokobanHeroAction::Push, PushClip.Object);
 	}
-	ActionPlayRates.Add(ESokobanHeroAction::Walk, 1.5f);
-	// There is no dedicated push clip yet: a slower stride plus a forward lean reads as shoving.
-	ActionPlayRates.Add(ESokobanHeroAction::Push, 0.9f);
-	ActionLeans.Add(ESokobanHeroAction::Push, 14.f);
+	if (VictoryClip.Succeeded())
+	{
+		ActionClips.Add(ESokobanHeroAction::Victory, VictoryClip.Object);
+	}
+	// A step takes a fraction of a second, so both cycles run faster than their natural pace.
+	ActionPlayRates.Add(ESokobanHeroAction::Walk, 1.4f);
+	ActionPlayRates.Add(ESokobanHeroAction::Push, 1.8f);
+	ActionReaches.Add(ESokobanHeroAction::Push, 16.f);
+}
+
+void ASokobanHero::AddPartsTo(USkeletalMeshComponent* Body, EComponentCreationMethod CreationMethod) const
+{
+	AActor* BodyOwner = Body->GetOwner();
+	for (USkeletalMesh* Part : AttachedParts)
+	{
+		if (!Part)
+		{
+			continue;
+		}
+		USkeletalMeshComponent* Follower = NewObject<USkeletalMeshComponent>(BodyOwner, NAME_None, RF_Transient);
+		Follower->CreationMethod = CreationMethod;
+		Follower->SetupAttachment(Body);
+		Follower->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Follower->SetSkeletalMeshAsset(Part);
+		Follower->SetLeaderPoseComponent(Body);
+		Follower->RegisterComponent();
+		if (CreationMethod == EComponentCreationMethod::Instance)
+		{
+			BodyOwner->AddInstanceComponent(Follower);
+		}
+	}
 }
 
 void ASokobanHero::BeginPlay()
 {
 	Super::BeginPlay();
+	AddPartsTo(Mesh, EComponentCreationMethod::Instance);
 	PlayAction(ESokobanHeroAction::Idle);
 }
 
@@ -75,6 +115,11 @@ void ASokobanHero::Tick(float DeltaSeconds)
 	const float* TargetLean = ActionLeans.Find(CurrentAction);
 	CurrentLean = FMath::FInterpTo(CurrentLean, TargetLean ? *TargetLean : 0.f, DeltaSeconds, LeanSpeed);
 	VisualRoot->SetRelativeRotation(FRotator(-CurrentLean, 0.f, 0.f));
+
+	// The body (not VisualRoot, which bumps use) shifts towards the crate while pushing.
+	const float* TargetReach = ActionReaches.Find(CurrentAction);
+	CurrentReach = FMath::FInterpTo(CurrentReach, TargetReach ? *TargetReach : 0.f, DeltaSeconds, LeanSpeed);
+	Mesh->SetRelativeLocation(FVector(CurrentReach, 0.f, 0.f));
 }
 
 void ASokobanHero::SetFacing(ESokobanDirection Direction, bool bInstant)
