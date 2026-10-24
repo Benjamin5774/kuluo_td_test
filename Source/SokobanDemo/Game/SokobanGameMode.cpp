@@ -56,6 +56,15 @@ void ASokobanGameMode::StartPlay()
 	BoardView = PlacedBoard ? *PlacedBoard : GetWorld()->SpawnActor<ASokobanBoardView>(BoardViewClass, FTransform::Identity, SpawnParams);
 	CameraRig = GetWorld()->SpawnActor<ASokobanCameraRig>(CameraRigClass, FTransform::Identity, SpawnParams);
 
+	// Zoomed out, the camera frames an area that holds the largest level, so the scenery placed around the
+	// castle looks the same whichever level is on the board.
+	FIntPoint LargestSize(0, 0);
+	for (const FSokobanLevel& Level : Levels)
+	{
+		LargestSize = FIntPoint(FMath::Max(LargestSize.X, Level.Layout.Size.X), FMath::Max(LargestSize.Y, Level.Layout.Size.Y));
+	}
+	SceneBounds = BoardView->GetBoundsForSize(LargestSize);
+
 	Super::StartPlay();
 
 	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
@@ -161,7 +170,7 @@ void ASokobanGameMode::LoadLevel(int32 Index)
 	LastAnimationTime = 0.f;
 
 	BoardView->BuildLevel(Level);
-	CameraRig->FrameBounds(BoardView->GetPlayBounds(), false);
+	CameraRig->FrameBounds(BoardView->GetPlayBounds(), SceneBounds, false);
 
 	UE_LOG(LogSokoban, Log, TEXT("Level %d/%d: %s (%s), par %d"), LevelIndex + 1, Levels.Num(), *Level.Name, *Level.Id, Level.Par);
 	OnPuzzleChanged.Broadcast();
@@ -207,6 +216,19 @@ FSokobanMoveResult ASokobanGameMode::RequestMove(ESokobanDirection Direction)
 	return Result;
 }
 
+bool ASokobanGameMode::RetractLastWalk()
+{
+	if (FlowState != ESokobanFlowState::Playing || bSolved || !Puzzle.Undo())
+	{
+		return false;
+	}
+
+	BoardView->StopHero(Puzzle.GetActiveHero());
+	LastAnimationTime = 0.f;
+	OnPuzzleChanged.Broadcast();
+	return true;
+}
+
 bool ASokobanGameMode::RequestUndo()
 {
 	if (FlowState != ESokobanFlowState::Playing || bSolved || !Puzzle.Undo())
@@ -240,6 +262,7 @@ void ASokobanGameMode::HandleLevelSolved()
 	const FSokobanLevel& Level = Puzzle.GetLevel();
 	LastCompletion.Moves = Puzzle.GetState().MoveCount;
 	LastCompletion.Par = Level.Par;
+	LastCompletion.Stars = FSokobanRules::StarsForSolve(LastCompletion.Moves, Level.Par);
 	LastCompletion.bLastLevel = LevelIndex == Levels.Num() - 1;
 	LastCompletion.bNewBest = false;
 	if (USokobanProgressSubsystem* Progress = GetProgress())

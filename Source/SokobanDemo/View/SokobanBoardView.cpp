@@ -44,17 +44,14 @@ ASokobanBoardView::ASokobanBoardView()
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderMesh(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlaneMesh(TEXT("/Engine/BasicShapes/Plane.Plane"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> TerrainMaterialAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_Terrain.MI_Terrain"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ShelfMaterialAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_TerrainShelf.MI_TerrainShelf"));
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WaterMaterialAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_Water.MI_Water"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> GoalPlateAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_GoalPlate.MI_GoalPlate"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> GoalSocketAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_GoalSocket.MI_GoalSocket"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> CastleWallAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_CastleWall.MI_CastleWall"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MortarAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_Mortar.MI_Mortar"));
 	TerrainMaterial = TerrainMaterialAsset.Object;
 	ShelfMaterial = ShelfMaterialAsset.Object;
-	WaterMaterial = WaterMaterialAsset.Object;
 	GoalPlateMaterial = GoalPlateAsset.Object;
 	GoalSocketMaterial = GoalSocketAsset.Object;
 	CastleWallMaterial = CastleWallAsset.Object;
@@ -76,15 +73,6 @@ ASokobanBoardView::ASokobanBoardView()
 	// Custom data 0: how pressed each plate is (the plate material glows with it).
 	GoalMarkers->NumCustomDataFloats = 1;
 	ShelfTiles = CreateLayer(TEXT("ShelfTiles"), CubeMesh.Object);
-
-	// A sea reaching past the edges of the high camera's view.
-	Water = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Water"));
-	Water->SetupAttachment(RootComponent);
-	Water->SetStaticMesh(PlaneMesh.Object);
-	Water->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	Water->SetCastShadow(false);
-	Water->SetMobility(EComponentMobility::Movable);
-	Water->SetRelativeScale3D(FVector(600.f, 600.f, 1.f));
 
 	// The preview copies its meshes from the piece classes when it is built.
 	PreviewCrates = CreateLayer(TEXT("PreviewCrates"), nullptr);
@@ -128,16 +116,6 @@ ASokobanBoardView::ASokobanBoardView()
 		MakeDressing(TEXT("Rock_Medium_1"), 0.25f, 0.4f),
 		MakeDressing(TEXT("Rock_Medium_2"), 0.25f, 0.4f),
 		MakeDressing(TEXT("Rock_Medium_3"), 0.22f, 0.36f),
-	};
-	IsletRocks = {
-		MakeDressing(TEXT("Rock_Medium_1"), 0.55f, 0.9f),
-		MakeDressing(TEXT("Rock_Medium_2"), 0.55f, 0.9f),
-		MakeDressing(TEXT("Rock_Medium_3"), 0.5f, 0.8f),
-	};
-	IsletTrees = {
-		MakeDressing(TEXT("CommonTree_1"), 0.3f, 0.42f),
-		MakeDressing(TEXT("CommonTree_3"), 0.26f, 0.36f),
-		MakeDressing(TEXT("Bush_Common_Flowers"), 0.45f, 0.6f),
 	};
 }
 
@@ -253,8 +231,6 @@ void ASokobanBoardView::BuildTerrain(const FSokobanLevel& Level)
 	FloorTiles->SetStaticMesh(FloorMesh);
 	// The tile keeps its own material (maps saved by older builds carry a flat-colour override here).
 	FloorTiles->EmptyOverrideMaterials();
-	Water->SetMaterial(0, WaterMaterial);
-	Water->SetRelativeLocation(FVector(0.f, 0.f, WaterLevel));
 
 	// Basic shapes are 100 units across with a centred pivot; Unit rescales them to the cell size.
 	// Island, wall and shelf blocks fill whole cells so neighbours merge into one mass.
@@ -510,31 +486,6 @@ void ASokobanBoardView::BuildDressing(const FSokobanLevel& Level)
 			}
 		}
 	}
-
-	// Islets around the board, kept out of the southern sector the camera looks across.
-	const FBox Bounds = GetPlayBounds();
-	const float Radius = Bounds.GetExtent().Size2D();
-	for (int32 Index = 0; Index < IsletCount && IsletRocks.Num() > 0; ++Index)
-	{
-		const FSokobanDressing& Rock = IsletRocks[Random.RandHelper(IsletRocks.Num())];
-		if (!Rock.Mesh)
-		{
-			continue;
-		}
-		const float Angle = FMath::DegreesToRadians(-135.f + 270.f * (Index + Random.FRandRange(0.15f, 0.85f)) / IsletCount);
-		const float Distance = Radius + Random.FRandRange(IsletDistance.X, IsletDistance.Y);
-		const FVector Center = Bounds.GetCenter() + FVector(FMath::Cos(Angle), FMath::Sin(Angle), 0.f) * Distance;
-
-		// Sink the rock so its top third shows above the water, then stand a tree on it.
-		const float RockScale = Random.FRandRange(Rock.MinScale, Rock.MaxScale);
-		const float RockHeight = Rock.Mesh->GetBoundingBox().Max.Z * RockScale;
-		const FVector RockBase(Center.X, Center.Y, GetActorLocation().Z + WaterLevel - RockHeight * 0.65f);
-		DressingLayer(Rock.Mesh)->AddInstance(FTransform(FRotator(0.f, Random.FRandRange(0.f, 360.f), 0.f), RockBase, FVector(RockScale)), true);
-		if (IsletTrees.Num() > 0 && Random.FRand() < 0.8f)
-		{
-			AddDressing(IsletTrees[Random.RandHelper(IsletTrees.Num())], RockBase + FVector(0.f, 0.f, RockHeight * 0.85f), Random);
-		}
-	}
 }
 
 const FSokobanDressing* ASokobanBoardView::PickDressing(const TArray<FSokobanDressing>& Choices, bool bLowOnly, FRandomStream& Random)
@@ -741,8 +692,15 @@ float ASokobanBoardView::PlayMove(const FSokobanMoveResult& Move, const FSokoban
 	}
 
 	default:
-		// Refused: the hero leans into the obstacle and the stuck row shudders.
+		// Refused: the hero leans into the obstacle and the stuck row shudders. A hero halted mid-step (its
+		// step taken back for a late turn) first steps back onto its cell.
 		PushingDirection.Reset();
+		if (!Hero->GetActorLocation().Equals(CellToWorld(Move.From), 1.f))
+		{
+			Glide.Style = ESokobanGlideStyle::Steady;
+			Glide.Duration = BumpDuration;
+			Hero->MoveTo(CellToWorld(Move.From), Glide);
+		}
 		Hero->Bump(Forward, 18.f, BumpDuration);
 		for (int32 CrateId : Move.Row)
 		{
@@ -806,6 +764,14 @@ void ASokobanBoardView::FinishAnimations()
 	}
 }
 
+void ASokobanBoardView::StopHero(int32 Index)
+{
+	if (Heroes.IsValidIndex(Index))
+	{
+		Heroes[Index]->StopGlide();
+	}
+}
+
 void ASokobanBoardView::PlayVictory()
 {
 	for (ASokobanHero* Hero : Heroes)
@@ -835,13 +801,15 @@ FVector ASokobanBoardView::CellToWorld(const FIntPoint& Cell) const
 
 FBox ASokobanBoardView::GetPlayBounds() const
 {
-	const FVector HalfCell(CellSize * 0.5f, CellSize * 0.5f, 0.f);
-	const FVector NorthWest = CellToWorld(FIntPoint(0, 0));
-	const FVector SouthEast = CellToWorld(FIntPoint(Layout.Size.X - 1, Layout.Size.Y - 1));
-	FBox Bounds(ForceInit);
-	Bounds += NorthWest + FVector(HalfCell.X, -HalfCell.Y, 0.f);
-	Bounds += SouthEast + FVector(-HalfCell.X, HalfCell.Y, CellSize);
-	return Bounds;
+	return GetBoundsForSize(Layout.Size);
+}
+
+FBox ASokobanBoardView::GetBoundsForSize(const FIntPoint& Size) const
+{
+	// Rows run along X (north is +X), columns along Y; a cell high, so walls are in frame.
+	const FVector Half(Size.Y * CellSize * 0.5f, Size.X * CellSize * 0.5f, 0.f);
+	const FVector Center = GetActorLocation();
+	return FBox(Center - Half, Center + Half + FVector(0.f, 0.f, CellSize));
 }
 
 void ASokobanBoardView::ClearPieces()

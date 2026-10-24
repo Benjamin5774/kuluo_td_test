@@ -27,6 +27,8 @@ struct FSokobanCompletion
 {
 	int32 Moves = 0;
 	int32 Par = 0;
+	/** Stars this solve earned, 1 to FSokobanRules::MaxStars. */
+	int32 Stars = 0;
 	bool bNewBest = false;
 	bool bLastLevel = false;
 };
@@ -70,6 +72,12 @@ public:
 	FSokobanMoveResult RequestMove(ESokobanDirection Direction);
 	bool RequestUndo();
 	bool RequestRestart();
+
+	/**
+	 * Takes back the last move, which the caller knows was a plain walk, leaving the hero where it is drawn
+	 * mid-step so the next move sets off from there. Used to turn a corner the player reached a moment late.
+	 */
+	bool RetractLastWalk();
 
 	ESokobanFlowState GetFlowState() const { return FlowState; }
 	const FSokobanPuzzle& GetPuzzle() const { return Puzzle; }
@@ -147,6 +155,9 @@ private:
 	FSokobanCompletion LastCompletion;
 	float LastAnimationTime = 0.f;
 	FTimerHandle ResultsTimer;
+
+	/** The area the camera frames when zoomed out: room for the largest level of the pack. */
+	FBox SceneBounds = FBox(ForceInit);
 
 	UPROPERTY(Transient)
 	TObjectPtr<ASokobanBoardView> BoardView;

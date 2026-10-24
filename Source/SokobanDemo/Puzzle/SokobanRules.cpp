@@ -82,3 +82,22 @@ bool FSokobanRules::IsSolved(const FSokobanLayout& Layout, const FSokobanBoardSt
 	}
 	return true;
 }
+
+int32 FSokobanRules::StarsForSolve(int32 Moves, int32 Par)
+{
+	if (Par <= 0)
+	{
+		return MaxStars;
+	}
+	if (Moves <= MovesForStars(3, Par))
+	{
+		return 3;
+	}
+	return Moves <= MovesForStars(2, Par) ? 2 : 1;
+}
+
+int32 FSokobanRules::MovesForStars(int32 Stars, int32 Par)
+{
+	// Two stars allow half as many moves again as par, rounded up.
+	return Stars >= MaxStars ? Par : FMath::CeilToInt(Par * 1.5f);
+}

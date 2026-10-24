@@ -16,6 +16,7 @@ CC0 不要求署名，这里仍然列出以示感谢。
 ## 项目自制
 
 - 主角：见上文"角色与动画"。
+- 评分星星：`Content/Sokoban/UI` 下的 T_StarFull、T_StarEmpty、T_StarGlow，由脚本绘制。
 - 材质：`Content/Sokoban/Materials` 下的 M_SokobanCharacter、M_SokobanProp、M_SokobanFoliage、M_SokobanTerrain、M_SokobanWater、M_SokobanGoalPlate、M_SokobanToon（卡通后期）、M_SokobanCloudShadows（云影灯光函数）。
 - 水面波纹法线贴图 T_WaterRipples_N：由脚本按正弦波叠加生成。
 

@@ -33,4 +33,10 @@ namespace SokobanStyle
 
 	/** Text block in the shared style, with a soft shadow for readability over the 3D scene. */
 	UTextBlock* MakeText(UWidgetTree& Tree, const FText& Content, int32 Size, bool bBold = false, const FLinearColor& Color = SokobanStyle::Text);
+
+	/** A rating star Size pixels across: earned (gold) or an empty slot. */
+	FSlateBrush StarBrush(bool bEarned, float Size);
+
+	/** A soft round glow Size pixels across, flashed behind a star as it lands. */
+	FSlateBrush GlowBrush(float Size, const FLinearColor& Tint);
 }

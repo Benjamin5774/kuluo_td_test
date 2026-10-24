@@ -213,6 +213,20 @@ bool FSokobanSolvedTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSokobanStarsTest, "Sokoban.Rules.Stars", SokobanTest::Flags)
+bool FSokobanStarsTest::RunTest(const FString& Parameters)
+{
+	TestEqual(TEXT("Par earns full stars"), FSokobanRules::StarsForSolve(3, 3), 3);
+	TestEqual(TEXT("Beating par earns full stars"), FSokobanRules::StarsForSolve(2, 3), 3);
+	TestEqual(TEXT("One over par drops a star"), FSokobanRules::StarsForSolve(4, 3), 2);
+	TestEqual(TEXT("Half par again, rounded up, still earns two"), FSokobanRules::StarsForSolve(5, 3), 2);
+	TestEqual(TEXT("Beyond that earns one"), FSokobanRules::StarsForSolve(6, 3), 1);
+	TestEqual(TEXT("Two-star limit for par 16"), FSokobanRules::MovesForStars(2, 16), 24);
+	TestEqual(TEXT("Any solve earns at least one star"), FSokobanRules::StarsForSolve(500, 16), 1);
+	TestEqual(TEXT("A level without par gives full stars"), FSokobanRules::StarsForSolve(40, 0), FSokobanRules::MaxStars);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSokobanSolverTest, "Sokoban.Solver.Basics", SokobanTest::Flags)
 bool FSokobanSolverTest::RunTest(const FString& Parameters)
 {

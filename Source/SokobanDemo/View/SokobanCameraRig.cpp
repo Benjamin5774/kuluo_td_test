@@ -26,14 +26,14 @@ void ASokobanCameraRig::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
-	if (!FramedBounds.IsValid)
+	if (!LevelBounds.IsValid)
 	{
 		return;
 	}
 
 	// Follow the zoom, and re-frame when the window changes shape so the board always fits.
 	FramedAspect = GetViewportAspect();
-	TargetLocation = ComputeLocation(GetPitch(), GetMargin());
+	TargetLocation = ComputeLocation();
 
 	// Location and pitch blend at the same rate, so the board stays centred while either changes.
 	CurrentLocation = FMath::VInterpTo(CurrentLocation, TargetLocation, DeltaSeconds, BlendSpeed);
@@ -58,13 +58,14 @@ void ASokobanCameraRig::Tick(float DeltaSeconds)
 	SetActorLocationAndRotation(CurrentLocation + Offset, FRotator(-CurrentPitch, 0.f, 0.f));
 }
 
-void ASokobanCameraRig::FrameBounds(const FBox& Bounds, bool bInstant)
+void ASokobanCameraRig::FrameBounds(const FBox& InLevelBounds, const FBox& InSceneBounds, bool bInstant)
 {
-	FramedBounds = Bounds;
+	LevelBounds = InLevelBounds;
+	SceneBounds = InSceneBounds.IsValid ? InSceneBounds + InLevelBounds : InLevelBounds;
 	FramedAspect = GetViewportAspect();
 	Camera->SetFieldOfView(FieldOfView);
 
-	TargetLocation = ComputeLocation(GetPitch(), GetMargin());
+	TargetLocation = ComputeLocation();
 	if (bInstant || CurrentLocation.IsZero())
 	{
 		CurrentLocation = TargetLocation;
@@ -93,12 +94,18 @@ float ASokobanCameraRig::GetPitch() const
 	return FMath::Lerp(WidePitch, ClosePitch, Zoom);
 }
 
-float ASokobanCameraRig::GetMargin() const
+FVector ASokobanCameraRig::ComputeLocation() const
 {
-	return FMath::Lerp(WideMargin, CloseMargin, Zoom);
+	// Blend the aim point and the distance rather than the two camera positions, so the view stays centred
+	// on the way between the scene and the level.
+	const FFraming Wide = ComputeFraming(SceneBounds, WidePitch, WideMargin);
+	const FFraming Close = ComputeFraming(LevelBounds, ClosePitch, CloseMargin);
+	const FVector Aim = FMath::Lerp(Wide.Aim, Close.Aim, Zoom);
+	const float Distance = FMath::Lerp(Wide.Distance, Close.Distance, Zoom);
+	return Aim - FRotationMatrix(FRotator(-GetPitch(), 0.f, 0.f)).GetUnitAxis(EAxis::X) * Distance;
 }
 
-FVector ASokobanCameraRig::ComputeLocation(float Pitch, float Margin) const
+ASokobanCameraRig::FFraming ASokobanCameraRig::ComputeFraming(const FBox& Bounds, float Pitch, float Margin) const
 {
 	const FRotationMatrix View(FRotator(-Pitch, 0.f, 0.f));
 	const FVector Forward = View.GetUnitAxis(EAxis::X);
@@ -110,11 +117,11 @@ FVector ASokobanCameraRig::ComputeLocation(float Pitch, float Margin) const
 	const float TanHalfV = TanHalfH / FramedAspect;
 
 	FVector Corners[8];
-	FramedBounds.GetVertices(Corners);
+	Bounds.GetVertices(Corners);
 
 	// Perspective makes the near edge loom larger, so fit every corner of the bounds to the frustum,
 	// then nudge the aim point until the top and bottom margins match. A few passes converge.
-	FVector Aim = FramedBounds.GetCenter();
+	FVector Aim = Bounds.GetCenter();
 	float Distance = 0.f;
 	for (int32 Pass = 0; Pass < 3; ++Pass)
 	{
@@ -139,7 +146,7 @@ FVector ASokobanCameraRig::ComputeLocation(float Pitch, float Margin) const
 		Aim += Up * ((Lowest + Highest) * 0.5f * Distance);
 	}
 
-	return Aim - Forward * Distance;
+	return { Aim, Distance };
 }
 
 float ASokobanCameraRig::GetViewportAspect()

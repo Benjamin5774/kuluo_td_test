@@ -6,6 +6,9 @@
 #include "Blueprint/UserWidget.h"
 #include "SokobanMenuPanel.generated.h"
 
+class UBorder;
+class UHorizontalBox;
+class UImage;
 class USokobanButton;
 class UTextBlock;
 class UVerticalBox;
@@ -18,15 +21,24 @@ struct FSokobanMenuItem
 	bool bEnabled = true;
 };
 
-/** Centred panel with a title, an optional message and a column of buttons: main menu, pause, results. */
+/**
+ * Centred panel with a title, an optional row of rating stars, an optional message and a column of buttons:
+ * main menu, pause, results.
+ */
 UCLASS()
 class SOKOBANDEMO_API USokobanMenuPanel : public UUserWidget
 {
 	GENERATED_BODY()
 
 public:
-	/** Fills the panel. OnBack runs on Esc / gamepad B and may be empty. */
+	/** Fills the panel (without the rating row). OnBack runs on Esc / gamepad B and may be empty. */
 	void Present(const FText& Title, const FText& Message, TArray<FSokobanMenuItem> Items, TFunction<void()> OnBack);
+
+	/**
+	 * Shows the rating row under the title: Earned of the stars slam into their slots one after another,
+	 * each landing with a bounce, a glow, a burst of sparks and a jolt of the panel. Call after Present.
+	 */
+	void ShowStars(int32 Earned);
 
 	/** Gives keyboard / gamepad focus to the first enabled button. */
 	void FocusFirstButton();
@@ -37,8 +49,32 @@ protected:
 	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
 
 private:
+	/** Poses the stars, glows and sparks, and jolts the panel, StarClock seconds into the reveal. */
+	void AnimateStars();
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> PanelBorder;
+
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> TitleText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UHorizontalBox> StarRow;
+
+	/** The earned look of each star, the glow behind it, and its sparks (SparksPerStar per star, in star order). */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UImage>> StarImages;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UImage>> GlowImages;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UImage>> SparkImages;
+
+	int32 StarsEarned = 0;
+
+	/** Seconds since ShowStars; negative when no reveal is running. */
+	float StarClock = -1.f;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> MessageText;

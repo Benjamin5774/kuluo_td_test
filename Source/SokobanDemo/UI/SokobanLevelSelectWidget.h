@@ -17,6 +17,8 @@ struct FSokobanLevelCard
 	FText Status;
 	bool bUnlocked = false;
 	bool bSolved = false;
+	/** Stars of the best solve; 0 while unsolved. */
+	int32 Stars = 0;
 };
 
 /** Grid of level cards with lock / best-score status. */

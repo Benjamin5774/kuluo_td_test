@@ -52,8 +52,9 @@ ASokobanHero::ASokobanHero()
 	{
 		ActionClips.Add(ESokobanHeroAction::Victory, VictoryClip.Object);
 	}
-	// Both clips hold two footfalls: one step per cell, walking or pushing, timed to the move.
-	ActionCyclesPerMove.Add(ESokobanHeroAction::Walk, 0.5f);
+	// Both clips hold two footfalls, timed to the move: short legs patter two steps across each cell when
+	// walking, and dig in one heavy step per push.
+	ActionCyclesPerMove.Add(ESokobanHeroAction::Walk, 1.f);
 	ActionCyclesPerMove.Add(ESokobanHeroAction::Push, 0.5f);
 	// The push clip leans in with the arms locked forward; shift the body so the paws meet the crate.
 	ActionReaches.Add(ESokobanHeroAction::Push, 17.f);

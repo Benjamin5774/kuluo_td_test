@@ -9,8 +9,9 @@
 class UCameraComponent;
 
 /**
- * High-angle camera that frames the whole board and glides when the level changes. It starts pulled back so
- * the castle's surroundings show; the player can zoom in to a tight framing of the board and back out.
+ * High-angle camera. Zoomed out (the starting view) it frames the scene around the castle, an area big enough
+ * for the largest level of the pack, so the hand-placed scenery looks the same in every level; zoomed in it
+ * frames the current level tightly. The player zooms with the mouse wheel; level changes glide.
  */
 UCLASS()
 class SOKOBANDEMO_API ASokobanCameraRig : public AActor
@@ -22,8 +23,8 @@ public:
 
 	virtual void Tick(float DeltaSeconds) override;
 
-	/** Frames Bounds at the current zoom; glides there unless bInstant. */
-	void FrameBounds(const FBox& Bounds, bool bInstant);
+	/** Frames a level: zoomed out it shows InSceneBounds, zoomed in InLevelBounds. Glides there unless bInstant. */
+	void FrameBounds(const FBox& InLevelBounds, const FBox& InSceneBounds, bool bInstant);
 
 	/** Zooms in (positive) or out (negative) by Steps notches of ZoomStep. */
 	void AddZoom(float Steps);
@@ -39,11 +40,11 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Camera", meta = (ClampMin = "20", ClampMax = "89"))
 	float ClosePitch = 62.f;
 
-	/** Room around the board when zoomed all the way out (1 = edge to edge). */
+	/** Room around the scene area when zoomed all the way out (1 = edge to edge). */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Camera", meta = (ClampMin = "1"))
-	float WideMargin = 1.85f;
+	float WideMargin = 1.95f;
 
-	/** Room around the board when zoomed all the way in. */
+	/** Room around the level when zoomed all the way in. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Camera", meta = (ClampMin = "1"))
 	float CloseMargin = 1.18f;
 
@@ -71,15 +72,25 @@ protected:
 	TObjectPtr<UCameraComponent> Camera;
 
 private:
-	/** Pitch and margin at the current zoom. */
-	float GetPitch() const;
-	float GetMargin() const;
+	/** Where the camera aims, and how far back along its view it stands. */
+	struct FFraming
+	{
+		FVector Aim = FVector::ZeroVector;
+		float Distance = 0.f;
+	};
 
-	/** Camera location that frames FramedBounds from Pitch with Margin, at the current viewport aspect ratio. */
-	FVector ComputeLocation(float Pitch, float Margin) const;
+	/** Pitch at the current zoom. */
+	float GetPitch() const;
+
+	/** Fits Bounds into the view from Pitch with Margin, at the current viewport aspect ratio. */
+	FFraming ComputeFraming(const FBox& Bounds, float Pitch, float Margin) const;
+
+	/** Camera location at the current zoom, between the scene framing and the level framing. */
+	FVector ComputeLocation() const;
 	static float GetViewportAspect();
 
-	FBox FramedBounds = FBox(ForceInit);
+	FBox LevelBounds = FBox(ForceInit);
+	FBox SceneBounds = FBox(ForceInit);
 	float FramedAspect = 0.f;
 
 	/** 0 = wide (the starting view), 1 = close. */

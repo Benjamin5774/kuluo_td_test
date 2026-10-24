@@ -150,7 +150,12 @@ void ASokobanPlayerController::PlayerTick(float DeltaTime)
 		}
 		else if (HeldDirections.Num() > 0 && GetWorld()->GetTimeSeconds() - LastPressTime >= MoveRepeatDelay)
 		{
-			IssueMove(HeldDirections.Last());
+			// Note a walking step the held key carried the hero on into: a turn pressed a moment later
+			// takes it back (TryTurnLate).
+			const ESokobanDirection Next = HeldDirections.Last();
+			const bool bWalked = IssueMove(Next).Outcome == ESokobanMoveOutcome::Walked;
+			CarriedStepTime = bWalked ? GetWorld()->GetTimeSeconds() : -1.0;
+			CarriedStepDirection = Next;
 		}
 		else if (AutoMoves.Num() > 0)
 		{
@@ -166,6 +171,7 @@ void ASokobanPlayerController::PlayerTick(float DeltaTime)
 		if (UndoRepeatTimer <= 0.f)
 		{
 			ASokobanGameMode* GameMode = GetSokobanGameMode();
+			CarriedStepTime = -1.0;
 			if (GameMode && GameMode->RequestUndo())
 			{
 				MarkBoardBusy();
@@ -188,15 +194,35 @@ void ASokobanPlayerController::OnDirectionPressed(ESokobanDirection Direction)
 	HeldDirections.Add(Direction);
 	LastPressTime = GetWorld()->GetTimeSeconds();
 
-	if (IsBoardBusy())
+	if (!IsBoardBusy())
+	{
+		IssueMove(Direction);
+	}
+	else if (!TryTurnLate(Direction))
 	{
 		// Keep the latest press; it plays when the running move lands.
 		BufferedMove = Direction;
 	}
-	else
+}
+
+bool ASokobanPlayerController::TryTurnLate(ESokobanDirection Direction)
+{
+	// The held key carried the hero on into another step just before this turn came in: the player meant
+	// to turn at the cell it was leaving, so take that step back and turn there instead.
+	if (CarriedStepTime < 0.0 || Direction == CarriedStepDirection || GetWorld()->GetTimeSeconds() - CarriedStepTime > TurnGrace)
 	{
-		IssueMove(Direction);
+		return false;
 	}
+
+	CarriedStepTime = -1.0;
+	ASokobanGameMode* GameMode = GetSokobanGameMode();
+	if (!GameMode || !GameMode->RetractLastWalk())
+	{
+		return false;
+	}
+	BufferedMove.Reset();
+	IssueMove(Direction);
+	return true;
 }
 
 void ASokobanPlayerController::OnDirectionReleased(ESokobanDirection Direction)
@@ -214,6 +240,7 @@ void ASokobanPlayerController::OnUndoPressed()
 
 	AutoMoves.Reset();
 	BufferedMove.Reset();
+	CarriedStepTime = -1.0;
 	if (GameMode->RequestUndo())
 	{
 		MarkBoardBusy();
@@ -234,6 +261,7 @@ void ASokobanPlayerController::OnRestartPressed()
 	{
 		AutoMoves.Reset();
 		BufferedMove.Reset();
+		CarriedStepTime = -1.0;
 		if (GameMode->RequestRestart())
 		{
 			MarkBoardBusy();
@@ -258,13 +286,17 @@ void ASokobanPlayerController::OnZoom(const FInputActionValue& Value)
 	}
 }
 
-void ASokobanPlayerController::IssueMove(ESokobanDirection Direction)
+FSokobanMoveResult ASokobanPlayerController::IssueMove(ESokobanDirection Direction)
 {
+	// Any move other than a held key's repeat (which notes itself afterwards) can't be taken back for a late turn.
+	CarriedStepTime = -1.0;
+	FSokobanMoveResult Result;
 	if (ASokobanGameMode* GameMode = GetSokobanGameMode())
 	{
-		GameMode->RequestMove(Direction);
+		Result = GameMode->RequestMove(Direction);
 		MarkBoardBusy();
 	}
+	return Result;
 }
 
 bool ASokobanPlayerController::IsBoardBusy() const
@@ -298,6 +330,7 @@ void ASokobanPlayerController::HandleFlowStateChanged(ESokobanFlowState State)
 	HeldDirections.Reset();
 	BufferedMove.Reset();
 	BoardBusyUntil = 0.0;
+	CarriedStepTime = -1.0;
 	bUndoHeld = false;
 	if (State != ESokobanFlowState::Playing)
 	{
@@ -349,7 +382,7 @@ void ASokobanPlayerController::HandlePuzzleChanged()
 	Stats.Add(FText::Format(LOCTEXT("Moves", "步数 {0}"), GameMode->GetPuzzle().GetState().MoveCount));
 	if (Level.Par > 0)
 	{
-		Stats.Add(FText::Format(LOCTEXT("Par", "标准 {0}"), Level.Par));
+		Stats.Add(FText::Format(LOCTEXT("Par", "满星 {0}"), Level.Par));
 	}
 	if (const int32 Best = GameMode->GetBestMoves(GameMode->GetLevelIndex()))
 	{
@@ -393,17 +426,18 @@ void ASokobanPlayerController::PresentLevelSelect()
 		Card.bUnlocked = GameMode->IsLevelUnlocked(Index);
 		const int32 Best = GameMode->GetBestMoves(Index);
 		Card.bSolved = Best > 0;
+		Card.Stars = Card.bSolved ? FSokobanRules::StarsForSolve(Best, Level.Par) : 0;
 		if (!Card.bUnlocked)
 		{
 			Card.Status = LOCTEXT("Locked", "未解锁");
 		}
 		else if (Card.bSolved)
 		{
-			Card.Status = FText::Format(LOCTEXT("CardBest", "最佳 {0} 步 · 标准 {1} 步"), Best, Level.Par);
+			Card.Status = FText::Format(LOCTEXT("CardBest", "最佳 {0} 步 · 满星 {1} 步"), Best, Level.Par);
 		}
 		else
 		{
-			Card.Status = FText::Format(LOCTEXT("CardOpen", "未完成 · 标准 {0} 步"), Level.Par);
+			Card.Status = FText::Format(LOCTEXT("CardOpen", "未完成 · 满星 {0} 步"), Level.Par);
 		}
 	}
 
@@ -447,11 +481,12 @@ void ASokobanPlayerController::PresentResults()
 	const FSokobanCompletion& Result = GameMode->GetLastCompletion();
 	TArray<FText> Lines;
 	Lines.Add(Result.Par > 0
-		? FText::Format(LOCTEXT("MovesUsedPar", "用了 {0} 步（标准 {1} 步）"), Result.Moves, Result.Par)
+		? FText::Format(LOCTEXT("MovesUsedPar", "用了 {0} 步（满星 {1} 步）"), Result.Moves, Result.Par)
 		: FText::Format(LOCTEXT("MovesUsed", "用了 {0} 步"), Result.Moves));
-	if (Result.Par > 0 && Result.Moves <= Result.Par)
+	if (Result.Par > 0 && Result.Stars == 1)
 	{
-		Lines.Add(LOCTEXT("ParMet", "达到标准步数，漂亮！"));
+		// The next star within reach.
+		Lines.Add(FText::Format(LOCTEXT("TwoStarsAt", "{0} 步内过关可得两颗星"), FSokobanRules::MovesForStars(2, Result.Par)));
 	}
 	if (Result.bNewBest)
 	{
@@ -478,6 +513,7 @@ void ASokobanPlayerController::PresentResults()
 	MenuPanel->SetVisibility(ESlateVisibility::Visible);
 	FocusUI(MenuPanel);
 	MenuPanel->Present(Result.bLastLevel ? LOCTEXT("AllClear", "全部完成！") : LOCTEXT("Clear", "过关！"), FText::Join(FText::FromString(TEXT("\n")), Lines), MoveTemp(Items), ToLevels);
+	MenuPanel->ShowStars(Result.Stars);
 }
 
 void ASokobanPlayerController::FocusUI(UUserWidget* Widget)
@@ -592,6 +628,33 @@ void ASokobanPlayerController::SokobanDump(float Delay)
 		{
 			UE_LOG(LogSokoban, Log, TEXT("Dump at %.2fs, move %d"), GetWorld()->GetTimeSeconds(), GameMode->GetPuzzle().GetState().MoveCount);
 			GameMode->GetBoardView()->DumpPieces(GameMode->GetPuzzle().GetState());
+		}
+	}), FMath::Max(Delay, 0.01f), false);
+}
+
+void ASokobanPlayerController::SokobanKey(const FString& Direction, bool bDown, float Delay)
+{
+	static const TMap<FString, ESokobanDirection> Names = {
+		{ TEXT("N"), ESokobanDirection::North }, { TEXT("S"), ESokobanDirection::South },
+		{ TEXT("E"), ESokobanDirection::East }, { TEXT("W"), ESokobanDirection::West } };
+	const ESokobanDirection* Found = Names.Find(Direction.ToUpper());
+	if (!Found)
+	{
+		UE_LOG(LogSokoban, Warning, TEXT("SokobanKey: unknown direction '%s' (use N, S, E or W)."), *Direction);
+		return;
+	}
+
+	const ESokobanDirection Key = *Found;
+	FTimerHandle Timer;
+	GetWorldTimerManager().SetTimer(Timer, FTimerDelegate::CreateWeakLambda(this, [this, Key, bDown]()
+	{
+		if (bDown)
+		{
+			OnDirectionPressed(Key);
+		}
+		else
+		{
+			OnDirectionReleased(Key);
 		}
 	}), FMath::Max(Delay, 0.01f), false);
 }

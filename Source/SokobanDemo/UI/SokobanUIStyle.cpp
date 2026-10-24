@@ -4,6 +4,32 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/TextBlock.h"
 #include "Engine/Font.h"
+#include "Engine/Texture2D.h"
+
+namespace
+{
+	/** An image from /Game/Sokoban/UI (drawn by the agent tool make_star_textures.py), loaded once. */
+	UTexture2D* UITexture(const TCHAR* Name)
+	{
+		static TMap<FString, TWeakObjectPtr<UTexture2D>> Loaded;
+		TWeakObjectPtr<UTexture2D>& Texture = Loaded.FindOrAdd(Name);
+		if (!Texture.IsValid())
+		{
+			Texture = LoadObject<UTexture2D>(nullptr, *FString::Printf(TEXT("/Game/Sokoban/UI/%s.%s"), Name, Name));
+		}
+		return Texture.Get();
+	}
+
+	FSlateBrush ImageBrush(UTexture2D* Texture, float Size, const FLinearColor& Tint)
+	{
+		FSlateBrush Brush;
+		Brush.DrawAs = ESlateBrushDrawType::Image;
+		Brush.SetResourceObject(Texture);
+		Brush.ImageSize = FVector2D(Size, Size);
+		Brush.TintColor = FSlateColor(Tint);
+		return Brush;
+	}
+}
 
 FSlateFontInfo SokobanStyle::Font(int32 Size, bool bBold)
 {
@@ -45,4 +71,14 @@ UTextBlock* SokobanStyle::MakeText(UWidgetTree& Tree, const FText& Content, int3
 	Block->SetShadowOffset(FVector2D(1.5f, 1.5f));
 	Block->SetShadowColorAndOpacity(FLinearColor(0.f, 0.f, 0.f, 0.55f));
 	return Block;
+}
+
+FSlateBrush SokobanStyle::StarBrush(bool bEarned, float Size)
+{
+	return ImageBrush(UITexture(bEarned ? TEXT("T_StarFull") : TEXT("T_StarEmpty")), Size, FLinearColor::White);
+}
+
+FSlateBrush SokobanStyle::GlowBrush(float Size, const FLinearColor& Tint)
+{
+	return ImageBrush(UITexture(TEXT("T_StarGlow")), Size, Tint);
 }

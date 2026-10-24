@@ -51,4 +51,16 @@ struct SOKOBANDEMO_API FSokobanRules
 
 	/** True when every goal holds a crate. */
 	static bool IsSolved(const FSokobanLayout& Layout, const FSokobanBoardState& State);
+
+	/** Most stars a solve can earn. */
+	static constexpr int32 MaxStars = 3;
+
+	/**
+	 * Stars a solve in Moves earns on a level whose par is Par: three within par ("full stars"), two within
+	 * MovesForStars(2, Par), one otherwise. A level without a par always gives three.
+	 */
+	static int32 StarsForSolve(int32 Moves, int32 Par);
+
+	/** Most moves that still earn Stars (2 or 3) on a level whose par is Par. */
+	static int32 MovesForStars(int32 Stars, int32 Par);
 };

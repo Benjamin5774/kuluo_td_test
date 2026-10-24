@@ -138,6 +138,16 @@ void ASokobanPiece::FinishMove()
 	}
 }
 
+void ASokobanPiece::StopGlide()
+{
+	if (bMoving)
+	{
+		bMoving = false;
+		// The glide now ends here and now, so a move that follows on starts from this spot at once.
+		CurrentGlide.Duration = FMath::Max(0.f, static_cast<float>(GetWorld()->GetTimeSeconds() - CurrentGlide.StartTime));
+	}
+}
+
 void ASokobanPiece::CompleteGlide()
 {
 	bMoving = false;

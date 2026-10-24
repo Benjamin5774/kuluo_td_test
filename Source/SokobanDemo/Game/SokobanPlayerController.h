@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "Puzzle/SokobanRules.h"
 #include "Puzzle/SokobanTypes.h"
 #include "SokobanPlayerController.generated.h"
 
@@ -60,6 +61,10 @@ public:
 	/** Dev: zooms the camera by Steps wheel notches (positive in) after Delay seconds. */
 	UFUNCTION(Exec)
 	void SokobanZoom(float Steps, float Delay = 0.f);
+
+	/** Dev: presses (bDown) or releases a direction key, N, S, E or W, after Delay seconds. */
+	UFUNCTION(Exec)
+	void SokobanKey(const FString& Direction, bool bDown, float Delay = 0.f);
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
@@ -76,6 +81,13 @@ protected:
 	/** Seconds a direction must be held before it starts repeating (it repeats when the current move lands). */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Input")
 	float MoveRepeatDelay = 0.12f;
+
+	/**
+	 * A turn pressed within this many seconds after a held key carried the hero on into another step takes
+	 * that step back and turns at the cell the hero was leaving, so a turn a moment late doesn't overshoot.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Input")
+	float TurnGrace = 0.09f;
 
 	/** Seconds the undo key must be held before rewinding continuously. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Input")
@@ -104,7 +116,10 @@ private:
 	void OnZoom(const FInputActionValue& Value);
 
 	/** Sends a move to the game mode; the next one waits until its animation has played out. */
-	void IssueMove(ESokobanDirection Direction);
+	FSokobanMoveResult IssueMove(ESokobanDirection Direction);
+
+	/** Turns at the cell the hero is leaving if a held key just carried it on (see TurnGrace). */
+	bool TryTurnLate(ESokobanDirection Direction);
 
 	/** Whether the last move, undo or restart is still animating. */
 	bool IsBoardBusy() const;
@@ -166,6 +181,10 @@ private:
 
 	/** World time when the board's current animation ends. */
 	double BoardBusyUntil = 0.0;
+
+	/** When a held key carried the hero on into the current walking step (negative when it didn't), and which way. */
+	double CarriedStepTime = -1.0;
+	ESokobanDirection CarriedStepDirection = ESokobanDirection::North;
 
 	bool bUndoHeld = false;
 	float UndoRepeatTimer = 0.f;

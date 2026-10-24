@@ -36,8 +36,12 @@ struct FSokobanDressing
 };
 
 /**
- * Draws a level as a small rocky island in the sea, dresses it, and animates the pieces.
- * It only mirrors the puzzle state; all rules live in the Puzzle layer.
+ * Draws a level from its layout: the castle (courtyard, walls, towers, goal plates), the rock it stands on with
+ * the shallows around it, and the plants that grow on them; and animates the pieces. It only mirrors the puzzle
+ * state; all rules live in the Puzzle layer.
+ *
+ * The scenery around the castle (the sea, islets, trees) is not generated here: it is placed by hand in the map
+ * (Outliner folder "Scenery") and stays the same for every level. The sea sits 60 cm below the floor.
  */
 UCLASS()
 class SOKOBANDEMO_API ASokobanBoardView : public AActor
@@ -59,6 +63,9 @@ public:
 	/** Completes all running animations at once, so a new input never waits. */
 	void FinishAnimations();
 
+	/** Halts hero Index wherever it is mid-step, after its last step was taken back; the next move sets off from there. */
+	void StopHero(int32 Index);
+
 	void PlayVictory();
 
 	/** Dev: logs every piece's grid cell, world location and visibility. */
@@ -68,6 +75,9 @@ public:
 
 	/** Bounds of the playable surface, used to frame the camera. */
 	FBox GetPlayBounds() const;
+
+	/** Bounds the playable surface of a level Size cells across (columns, rows) would have; levels are centred on the board. */
+	FBox GetBoundsForSize(const FIntPoint& Size) const;
 
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Layout")
 	float CellSize = 100.f;
@@ -160,9 +170,6 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
 	TObjectPtr<UMaterialInterface> ShelfMaterial;
 
-	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
-	TObjectPtr<UMaterialInterface> WaterMaterial;
-
 	/** Brass pressure plate on every goal; its material reads per-instance custom data 0, which is 1 while pressed. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
 	TObjectPtr<UMaterialInterface> GoalPlateMaterial;
@@ -178,10 +185,6 @@ public:
 	/** How far the walls inside the courtyard rise above the floor. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
 	float WallHeight = 50.f;
-
-	/** Sea level relative to the floor (the floor is at the board's height). */
-	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
-	float WaterLevel = -60.f;
 
 	/** Top of the shallows next to the island, relative to the floor; each further ring sits ShelfStep lower. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
@@ -230,20 +233,6 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Dressing")
 	float ShoreRockChance = 0.3f;
 
-	/** Small islands around the board: a rock each, most of them with a tree. */
-	UPROPERTY(EditAnywhere, Category = "Sokoban|Dressing")
-	TArray<FSokobanDressing> IsletRocks;
-
-	UPROPERTY(EditAnywhere, Category = "Sokoban|Dressing")
-	TArray<FSokobanDressing> IsletTrees;
-
-	UPROPERTY(EditAnywhere, Category = "Sokoban|Dressing")
-	int32 IsletCount = 12;
-
-	/** How far past the edge of the board the islets sit (min, max). */
-	UPROPERTY(EditAnywhere, Category = "Sokoban|Dressing")
-	FVector2D IsletDistance = FVector2D(60.f, 420.f);
-
 protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
@@ -269,7 +258,7 @@ private:
 	/** Chebyshev distance in cells from Cell to the island, or MaxDistance + 1 when farther than that. */
 	int32 DistanceToIsland(const FIntPoint& Cell, int32 MaxDistance) const;
 
-	/** Scatters wall and rim dressing, shore rocks and islets; the same level always gets the same scenery. */
+	/** Scatters wall and rim dressing and shore rocks; the same level is always dressed the same way. */
 	void BuildDressing(const FSokobanLevel& Level);
 	void AddDressing(const FSokobanDressing& Dressing, const FVector& Location, FRandomStream& Random);
 
@@ -327,9 +316,6 @@ private:
 	/** Underwater rock and sand around the island. */
 	UPROPERTY(VisibleAnywhere, Category = "Sokoban")
 	TObjectPtr<UInstancedStaticMeshComponent> ShelfTiles;
-
-	UPROPERTY(VisibleAnywhere, Category = "Sokoban")
-	TObjectPtr<UStaticMeshComponent> Water;
 
 	/** Editor-only stand-ins for the pieces in the preview. */
 	UPROPERTY(VisibleAnywhere, Category = "Sokoban|Preview")

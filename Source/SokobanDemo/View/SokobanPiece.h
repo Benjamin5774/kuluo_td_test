@@ -57,6 +57,9 @@ public:
 	/** Jumps to the end of any running glide or bump. */
 	void FinishMove();
 
+	/** Halts the running glide where the piece is now, as if it had been meant to end here. */
+	void StopGlide();
+
 	/** Shoves the visuals Distance along WorldDirection and back, used when a move is refused. */
 	void Bump(const FVector& WorldDirection, float Distance, float Duration);
 

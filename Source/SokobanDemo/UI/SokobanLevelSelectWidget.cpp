@@ -1,11 +1,15 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "UI/SokobanLevelSelectWidget.h"
+#include "Puzzle/SokobanRules.h"
 #include "UI/SokobanButton.h"
 #include "UI/SokobanUIStyle.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/ButtonSlot.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
+#include "Components/Image.h"
 #include "Components/Overlay.h"
 #include "Components/OverlaySlot.h"
 #include "Components/SizeBox.h"
@@ -93,9 +97,24 @@ void USokobanLevelSelectWidget::Present(const FText& PackName, const TArray<FSok
 		UVerticalBox* Lines = WidgetTree->ConstructWidget<UVerticalBox>();
 		CardSize->SetContent(Lines);
 
+		// The level number, with the stars earned so far (empty slots until solved) at the right.
+		UHorizontalBox* TopRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+		Lines->AddChildToVerticalBox(TopRow)->SetHorizontalAlignment(HAlign_Fill);
 		const FLinearColor NumberColor = !Card.bUnlocked ? SokobanStyle::TextDim : (Card.bSolved ? SokobanStyle::Accent : SokobanStyle::Text);
 		UTextBlock* Number = SokobanStyle::MakeText(*WidgetTree, FText::AsNumber(Index + 1), 30, true, NumberColor);
-		Lines->AddChildToVerticalBox(Number);
+		UHorizontalBoxSlot* NumberSlot = TopRow->AddChildToHorizontalBox(Number);
+		NumberSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		if (Card.bUnlocked)
+		{
+			for (int32 Star = 0; Star < FSokobanRules::MaxStars; ++Star)
+			{
+				UImage* Image = WidgetTree->ConstructWidget<UImage>();
+				Image->SetBrush(SokobanStyle::StarBrush(Star < Card.Stars, 24.f));
+				UHorizontalBoxSlot* StarSlot = TopRow->AddChildToHorizontalBox(Image);
+				StarSlot->SetVerticalAlignment(VAlign_Center);
+				StarSlot->SetPadding(FMargin(1.f, 0.f));
+			}
+		}
 
 		UTextBlock* Name = SokobanStyle::MakeText(*WidgetTree, Card.Name, 17, true, Card.bUnlocked ? SokobanStyle::Text : SokobanStyle::TextDim);
 		Lines->AddChildToVerticalBox(Name);
