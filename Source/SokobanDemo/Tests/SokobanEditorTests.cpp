@@ -45,6 +45,14 @@ bool FSokobanEditorBrushTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("...hero and goal included"), Canvas.GetCell(FIntPoint(3, 2)), TEXT('#'));
 	TestFalse(TEXT("Painting the same thing again changes nothing"), Canvas.Paint(FIntPoint(3, 2), ESokobanBrush::Wall));
 	TestFalse(TEXT("Painting outside the canvas changes nothing"), Canvas.Paint(FIntPoint(9, 9), ESokobanBrush::Floor));
+
+	// The edge takes only walls: nothing outside the canvas could wall anything else in.
+	TestTrue(TEXT("The outermost ring is the edge"), Canvas.IsEdge(FIntPoint(0, 2)) && Canvas.IsEdge(FIntPoint(5, 3)));
+	TestFalse(TEXT("...and the room inside it is not"), Canvas.IsEdge(FIntPoint(1, 1)));
+	TestFalse(TEXT("A crate can't go on the edge"), Canvas.Paint(FIntPoint(0, 2), ESokobanBrush::Crate));
+	TestTrue(TEXT("An edge wall can be erased"), Canvas.Paint(FIntPoint(0, 2), ESokobanBrush::Erase) && Canvas.GetCell(FIntPoint(0, 2)) == TEXT(' '));
+	TestFalse(TEXT("...but not painted over with floor"), Canvas.Paint(FIntPoint(0, 2), ESokobanBrush::Floor));
+	TestTrue(TEXT("...only with a wall again"), Canvas.Paint(FIntPoint(0, 2), ESokobanBrush::Wall) && Canvas.GetCell(FIntPoint(0, 2)) == TEXT('#'));
 	return true;
 }
 
@@ -55,8 +63,8 @@ bool FSokobanEditorMechanismTest::RunTest(const FString& Parameters)
 	Canvas.Paint(FIntPoint(1, 1), ESokobanBrush::Hero);
 	Canvas.Paint(FIntPoint(2, 2), ESokobanBrush::Crate);
 	Canvas.Paint(FIntPoint(5, 1), ESokobanBrush::Goal);
-	Canvas.Paint(FIntPoint(4, 1), ESokobanBrush::Trapdoor);
-	TestEqual(TEXT("A trapdoor needs a plate"), Canvas.FindIssues(), TArray<ESokobanCanvasIssue>{ ESokobanCanvasIssue::TrapdoorWithoutPlate });
+	Canvas.Paint(FIntPoint(4, 1), ESokobanBrush::Barrier);
+	TestEqual(TEXT("A barrier needs a plate"), Canvas.FindIssues(), TArray<ESokobanCanvasIssue>{ ESokobanCanvasIssue::BarrierWithoutPlate });
 
 	Canvas.Paint(FIntPoint(2, 2), ESokobanBrush::Plate);
 	TestEqual(TEXT("A plate goes under the crate"), Canvas.GetCell(FIntPoint(2, 2)), TEXT('$'));
@@ -64,9 +72,9 @@ bool FSokobanEditorMechanismTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("With a plate the drawing can be played"), Canvas.FindIssues().Num(), 0);
 
 	Canvas.Paint(FIntPoint(4, 1), ESokobanBrush::Goal);
-	TestEqual(TEXT("A goal replaces the trapdoor"), Canvas.GetMechanism(FIntPoint(4, 1)), TEXT(' '));
-	Canvas.Paint(FIntPoint(4, 1), ESokobanBrush::Trapdoor);
-	TestEqual(TEXT("...and a trapdoor the goal"), Canvas.GetCell(FIntPoint(4, 1)), TEXT('-'));
+	TestEqual(TEXT("A goal replaces the barrier"), Canvas.GetMechanism(FIntPoint(4, 1)), TEXT(' '));
+	Canvas.Paint(FIntPoint(4, 1), ESokobanBrush::Barrier);
+	TestEqual(TEXT("...and a barrier the goal"), Canvas.GetCell(FIntPoint(4, 1)), TEXT('-'));
 
 	Canvas.Paint(FIntPoint(2, 2), ESokobanBrush::Erase);
 	TestEqual(TEXT("Erasing takes the crate off the plate first"), Canvas.GetMechanism(FIntPoint(2, 2)), TEXT('P'));

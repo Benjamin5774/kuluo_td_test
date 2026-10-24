@@ -426,6 +426,11 @@ void ASokobanGameMode::SetFlowState(ESokobanFlowState NewState)
 	if (USokobanAudioSubsystem* Audio = USokobanAudioSubsystem::Get(this))
 	{
 		Audio->SetMusic(NewState == ESokobanFlowState::MainMenu ? ESokobanMusic::Title : ESokobanMusic::Game);
+		// The results bring the music back once their stars have landed; anywhere else it comes back at once.
+		if (NewState != ESokobanFlowState::LevelComplete)
+		{
+			Audio->ResumeMusic();
+		}
 	}
 	FlowState = NewState;
 	OnFlowStateChanged.Broadcast(NewState);
@@ -563,7 +568,9 @@ void ASokobanGameMode::HandleLevelSolved()
 		BoardView->PlayVictory();
 		if (USokobanAudioSubsystem* Audio = USokobanAudioSubsystem::Get(this))
 		{
+			// The music makes way for the fanfare and the stars.
 			Audio->Play(ESokobanSound::Win, 0.9f);
+			Audio->HoldMusic();
 		}
 		GetWorldTimerManager().SetTimer(ResultsTimer, FTimerDelegate::CreateWeakLambda(this, [this]()
 		{

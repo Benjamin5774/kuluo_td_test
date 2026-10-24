@@ -49,9 +49,6 @@ ASokobanTitleStage::ASokobanTitleStage()
 	Camera->PostProcessSettings.AutoExposureBias = -0.5f;
 
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> SandAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_BeachSand.MI_BeachSand"));
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> StoneAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_GoalSocket.MI_GoalSocket"));
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WoodAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_TrapdoorWood.MI_TrapdoorWood"));
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MetalAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_Metal.MI_Metal"));
 	SandMaterial = SandAsset.Object;
 
 	// The sandbar: two flattened domes rising out of the sea, which lies 60 cm below the castle floor.
@@ -60,24 +57,11 @@ ASokobanTitleStage::ASokobanTitleStage()
 	AddProp(TEXT("Spit"), Sphere, FVector(-800.f, 350.f, -84.f), 30.f, FVector(4.2f, 6.f, 0.8f))->SetMaterial(0, SandMaterial);
 
 	// The castle's gate, in the middle of its front wall (the castle is 10 by 6 cells, centred on this actor): an arched
-	// wooden door with iron bands in a stone frame. A rectangle and a disc make each arch.
-	UStaticMesh* Cube = FindMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	UStaticMesh* Cylinder = FindMesh(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	const FRotator Upright(90.f, 0.f, 0.f);
-	auto AddArch = [&](const TCHAR* Name, float Front, float Width, float Height, float Depth, UMaterialInterface* Material)
-	{
-		const FString Base(Name);
-		AddProp(*(Base + TEXT("Body")), Cube, FVector(Front, 0.f, Height * 0.5f - 4.f), 0.f, FVector(Depth, Width, Height + 8.f) / 100.f)->SetMaterial(0, Material);
-		UStaticMeshComponent* Top = AddProp(*(Base + TEXT("Top")), Cylinder, FVector(Front, 0.f, Height), 0.f, FVector(Width, Width, Depth) / 100.f);
-		Top->SetRelativeRotation(Upright);
-		Top->SetMaterial(0, Material);
-	};
-	AddArch(TEXT("GateFrame"), -303.f, 128.f, 88.f, 6.f, StoneAsset.Object);
-	AddArch(TEXT("GateDoor"), -305.f, 104.f, 84.f, 6.f, WoodAsset.Object);
-	for (const float BandHeight : { 22.f, 56.f, 90.f })
-	{
-		AddProp(*FString::Printf(TEXT("GateBand%d"), FMath::RoundToInt(BandHeight)), Cube, FVector(-309.f, 0.f, BandHeight), 0.f, FVector(0.03f, 0.98f, 0.05f))->SetMaterial(0, MetalAsset.Object);
-	}
+	// plank door in a brick frame, from the Quaternius Medieval Village MegaKit (CC0), both turned to face the beach.
+	// The door hangs from its left edge, so it sits half its width aside to fill the frame, set back a little in it.
+	constexpr float GateScale = 0.65f;
+	AddProp(TEXT("GateFrame"), FindEnvironmentMesh(TEXT("DoorFrame_Round_Brick")), FVector(-300.f, 0.f, 0.f), 90.f, FVector(GateScale));
+	AddProp(TEXT("GateDoor"), FindEnvironmentMesh(TEXT("Door_2_Round")), FVector(-298.f, -51.5f * GateScale, 0.f), 90.f, FVector(GateScale));
 
 	// Dressing from the Quaternius Stylized Nature MegaKit (CC0): rocks half buried in the sand, grass along its crest.
 	AddProp(TEXT("RockWest"), FindEnvironmentMesh(TEXT("Rock_Medium_2")), FVector(-1190.f, -450.f, -54.f), 40.f, FVector(0.42f));

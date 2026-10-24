@@ -31,7 +31,7 @@ namespace
 	/**
 	 * Floor cells a crate can never leave: corners that are not goals.
 	 * Crates are only ever pushed, so a crate wedged between two perpendicular blockers is stuck for good.
-	 * Trapdoors are floor here: they open, so they never count as blockers.
+	 * Barriers are floor here: they come down, so they never count as blockers.
 	 */
 	TArray<bool> FindDeadCorners(const FSokobanLayout& Layout)
 	{

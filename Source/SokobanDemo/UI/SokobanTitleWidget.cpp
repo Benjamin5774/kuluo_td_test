@@ -10,6 +10,7 @@
 #include "Components/CanvasPanelSlot.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/Image.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -72,12 +73,9 @@ void USokobanTitleWidget::NativeOnInitialized()
 	const FString Name = LOCTEXT("GameName", "海岛大冒险").ToString();
 	for (int32 Index = 0; Index < Name.Len(); ++Index)
 	{
-		FSlateFontInfo Font = SokobanStyle::Font(112, true);
-		Font.OutlineSettings.OutlineSize = 9;
-		Font.OutlineSettings.OutlineColor = FLinearColor(0.05f, 0.06f, 0.15f);
 		const FLinearColor Color = Index < 2 ? FLinearColor(0.45f, 0.9f, 1.f) : FLinearColor(1.f, 0.8f, 0.24f);
-		UTextBlock* Letter = SokobanStyle::MakeText(*WidgetTree, FText::FromString(Name.Mid(Index, 1)), 112, true, Color);
-		Letter->SetFont(Font);
+		UTextBlock* Letter = SokobanStyle::MakeText(*WidgetTree, FText::FromString(Name.Mid(Index, 1)), 112, ESokobanFontWeight::Heavy, Color);
+		Letter->SetFont(SokobanStyle::OutlinedFont(112, ESokobanFontWeight::Heavy, 9));
 		Letter->SetShadowOffset(FVector2D(5.f, 8.f));
 		Letter->SetShadowColorAndOpacity(FLinearColor(0.f, 0.f, 0.f, 0.4f));
 		Letter->SetRenderTransformPivot(FVector2D(0.5f, 0.7f));
@@ -85,11 +83,7 @@ void USokobanTitleWidget::NativeOnInitialized()
 		Letters.Add(Letter);
 	}
 
-	FSlateFontInfo SubtitleFont = SokobanStyle::Font(30, true);
-	SubtitleFont.OutlineSettings.OutlineSize = 3;
-	SubtitleFont.OutlineSettings.OutlineColor = FLinearColor(0.05f, 0.06f, 0.15f);
-	Subtitle = SokobanStyle::MakeText(*WidgetTree, LOCTEXT("Subtitle", "胖橘大力士的推箱子冒险"), 30, true, FLinearColor(1.f, 0.97f, 0.9f));
-	Subtitle->SetFont(SubtitleFont);
+	Subtitle = SokobanStyle::MakeSceneText(*WidgetTree, LOCTEXT("Subtitle", "胖橘的推箱子冒险"), 32, ESokobanFontWeight::Bold);
 	TitleBlock->AddChildToVerticalBox(Subtitle)->SetPadding(FMargin(14.f, 2.f, 0.f, 0.f));
 
 	// The menu, bottom left.
@@ -97,7 +91,7 @@ void USokobanTitleWidget::NativeOnInitialized()
 	UCanvasPanelSlot* MenuSlot = Root->AddChildToCanvas(ButtonColumn);
 	MenuSlot->SetAnchors(FAnchors(0.f, 1.f));
 	MenuSlot->SetAlignment(FVector2D(0.f, 1.f));
-	MenuSlot->SetPosition(FVector2D(100.f, -84.f));
+	MenuSlot->SetPosition(FVector2D(72.f, -76.f));
 	MenuSlot->SetAutoSize(true);
 
 	// Only the buttons take clicks.
@@ -110,21 +104,36 @@ void USokobanTitleWidget::Present(TArray<FSokobanMenuItem> Items, bool bIntro)
 {
 	ButtonColumn->ClearChildren();
 	Buttons.Reset();
+	Rows.Reset();
+	Paws.Reset();
 	for (FSokobanMenuItem& Item : Items)
 	{
 		USokobanButton* Button = WidgetTree->ConstructWidget<USokobanButton>();
-		Button->SetStyle(SokobanStyle::ButtonStyle());
+		Button->SetTone(Item.Tone);
 		Button->SetIsEnabled(Item.bEnabled);
 		Button->OnActivated = MoveTemp(Item.OnActivated);
 
-		UTextBlock* Label = SokobanStyle::MakeText(*WidgetTree, Item.Label, 24, true, Item.bEnabled ? SokobanStyle::Text : SokobanStyle::TextDim);
+		UTextBlock* Label = SokobanStyle::MakeText(*WidgetTree, Item.Label, 24, ESokobanFontWeight::Bold, Item.bEnabled ? SokobanStyle::Ink : SokobanStyle::InkSoft);
 		USizeBox* Width = WidgetTree->ConstructWidget<USizeBox>();
-		Width->SetMinDesiredWidth(250.f);
+		Width->SetMinDesiredWidth(236.f);
 		Width->SetContent(Label);
 		Button->SetContent(Width);
 
-		ButtonColumn->AddChildToVerticalBox(Button)->SetPadding(FMargin(0.f, 6.f));
+		// A paw beside the button points at the choice.
+		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
+		UImage* Paw = WidgetTree->ConstructWidget<UImage>();
+		Paw->SetBrush(SokobanStyle::IconBrush(TEXT("Paw"), 40.f));
+		Paw->SetRenderOpacity(0.f);
+		Paw->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+		UHorizontalBoxSlot* PawSlot = Row->AddChildToHorizontalBox(Paw);
+		PawSlot->SetVerticalAlignment(VAlign_Center);
+		PawSlot->SetPadding(FMargin(0.f, 0.f, 10.f, 0.f));
+		Row->AddChildToHorizontalBox(Button)->SetVerticalAlignment(VAlign_Center);
+
+		ButtonColumn->AddChildToVerticalBox(Row)->SetPadding(FMargin(0.f, 5.f));
 		Buttons.Add(Button);
+		Rows.Add(Row);
+		Paws.Add(Paw);
 	}
 
 	// Without the intro, start late enough that everything has arrived (the letters keep bobbing either way).
@@ -199,12 +208,20 @@ void USokobanTitleWidget::Animate()
 	Subtitle->SetRenderOpacity(SubtitleIn);
 	Subtitle->SetRenderTranslation(FVector2D(0.f, 16.f * (1.f - SubtitleIn)));
 
-	for (int32 Index = 0; Index < Buttons.Num(); ++Index)
+	for (int32 Index = 0; Index < Rows.Num(); ++Index)
 	{
 		const float Start = TitleLanded + 0.15f + 0.08f * Index;
 		const float In = Ease(Start, Start + 0.45f, Clock);
-		Buttons[Index]->SetRenderTranslation(FVector2D(-110.f * (1.f - In), 0.f));
-		Buttons[Index]->SetRenderOpacity(In);
+		Rows[Index]->SetRenderTranslation(FVector2D(-110.f * (1.f - In), 0.f));
+		Rows[Index]->SetRenderOpacity(In);
+
+		// The paw pats the air beside the chosen button.
+		const bool bChosen = Buttons[Index]->HasKeyboardFocus() || Buttons[Index]->IsHovered();
+		FWidgetTransform PawPose;
+		PawPose.Translation = FVector2D(-6.f * FMath::Abs(FMath::Sin(Clock * 4.f)), 0.f);
+		PawPose.Angle = 90.f;
+		Paws[Index]->SetRenderTransform(PawPose);
+		Paws[Index]->SetRenderOpacity(bChosen ? 1.f : 0.f);
 	}
 }
 

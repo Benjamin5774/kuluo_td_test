@@ -13,9 +13,10 @@ enum class ESokobanBrush : uint8
 	Crate,
 	Goal,
 	Hero,
-	/** A pressure plate: holding it down opens the trapdoors. */
+	/** A pressure plate: holding it down lowers the barriers. */
 	Plate,
-	Trapdoor,
+	/** A block of blue light standing in the way until the plates are held. */
+	Barrier,
 	/** Takes away the top-most thing in a cell: a piece, then a goal or mechanism, then the floor or wall itself. */
 	Erase
 };
@@ -26,14 +27,14 @@ enum class ESokobanCanvasIssue : uint8
 	NoHero,
 	NoGoal,
 	TooFewCrates,
-	/** There are trapdoors but no pressure plate that could open them. */
-	TrapdoorWithoutPlate,
+	/** There are barriers but no pressure plate that could lower them. */
+	BarrierWithoutPlate,
 	/** Some floor touches the void or the edge of the canvas instead of a wall. */
 	NotEnclosed
 };
 
 /**
- * A level being drawn in the editor, as a grid of XSB characters plus a grid of mechanisms ('P' plate, 'T' trapdoor,
+ * A level being drawn in the editor, as a grid of XSB characters plus a grid of mechanisms ('P' plate, 'B' barrier,
  * ' ' none). Unlike in level files, ' ' is always void and '-' is always floor, so a draft keeps exactly what was
  * drawn even before it is walled in. Pure logic.
  */
@@ -56,13 +57,22 @@ public:
 	const FIntPoint& GetSize() const { return Size; }
 	bool IsInside(const FIntPoint& Cell) const;
 
+	/**
+	 * Whether Cell is on the outermost ring of the canvas. Nothing beyond it can wall it in, so only walls stand there:
+	 * floor on the edge would always be open.
+	 */
+	bool IsEdge(const FIntPoint& Cell) const;
+
+	/** Whether Brush may paint Cell: anything inside the canvas, but on its edge only walls (and erasing). */
+	bool CanPaint(const FIntPoint& Cell, ESokobanBrush Brush) const;
+
 	/** The cell's character; ' ' outside the canvas. */
 	TCHAR GetCell(const FIntPoint& Cell) const;
 
-	/** The cell's mechanism: 'P', 'T', or ' ' for none (and outside the canvas). */
+	/** The cell's mechanism: 'P', 'B', or ' ' for none (and outside the canvas). */
 	TCHAR GetMechanism(const FIntPoint& Cell) const;
 
-	/** Paints one cell. Returns whether anything changed. */
+	/** Paints one cell (see CanPaint). Returns whether anything changed. */
 	bool Paint(const FIntPoint& Cell, ESokobanBrush Brush);
 
 	/** Grows or shrinks to NewSize (clamped to MinSize..MaxSize), keeping the top-left corner; new cells are void. */
@@ -98,6 +108,6 @@ private:
 	/** Row-major, Size.X * Size.Y characters. */
 	TArray<TCHAR> Cells;
 
-	/** Row-major like Cells: 'P', 'T' or ' '. */
+	/** Row-major like Cells: 'P', 'B' or ' '. */
 	TArray<TCHAR> Mechanisms;
 };

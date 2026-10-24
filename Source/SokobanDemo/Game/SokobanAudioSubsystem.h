@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/TimerHandle.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "SokobanAudioSubsystem.generated.h"
 
@@ -17,8 +18,8 @@ enum class ESokobanSound : uint8
 	Push,
 	Goal,
 	Plate,
-	TrapdoorOpen,
-	TrapdoorClose,
+	BarrierDown,
+	BarrierUp,
 	Bump,
 	Undo,
 	Click,
@@ -70,6 +71,15 @@ public:
 	/** Fades over to Music, and brings the sea nearer (on the title's beach) or further away. */
 	void SetMusic(ESokobanMusic Music);
 
+	/**
+	 * Holds the music where it is in the track, for a moment of quiet such as the stars of a cleared level (the sea
+	 * plays on). It plays on again with ResumeMusic, with another track, or by itself after MaxHold seconds.
+	 */
+	void HoldMusic(float MaxHold = 8.f);
+
+	/** Lets held music play on after Delay seconds, fading back in. */
+	void ResumeMusic(float Delay = 0.f);
+
 private:
 	/** A take of Sound other than the last one played, when there is a choice. */
 	USoundBase* PickTake(ESokobanSound Sound);
@@ -96,4 +106,9 @@ private:
 	TObjectPtr<UAudioComponent> SeaPlayer;
 
 	ESokobanMusic CurrentMusic = ESokobanMusic::None;
+
+	/** While held: pausing the music once it has dipped, then playing it on again. */
+	bool bMusicHeld = false;
+	FTimerHandle MusicPauseTimer;
+	FTimerHandle MusicResumeTimer;
 };

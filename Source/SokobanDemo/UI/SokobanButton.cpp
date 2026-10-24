@@ -2,7 +2,6 @@
 
 #include "UI/SokobanButton.h"
 #include "Game/SokobanAudioSubsystem.h"
-#include "UI/SokobanUIStyle.h"
 
 void USokobanButton::SynchronizeProperties()
 {
@@ -22,12 +21,31 @@ void USokobanButton::HandleClicked()
 	}
 }
 
+void USokobanButton::SetTone(ESokobanButtonTone InTone)
+{
+	Tone = InTone;
+	ApplyLook(bShowingFocus || bSelected);
+}
+
 void USokobanButton::UpdateFocusLook()
 {
 	const bool bFocused = HasKeyboardFocus();
 	if (bFocused != bShowingFocus)
 	{
 		bShowingFocus = bFocused;
-		SetStyle(SokobanStyle::ButtonStyle(bFocused));
+		ApplyLook(bShowingFocus || bSelected);
 	}
+}
+
+void USokobanButton::ShowSelected(bool bInSelected)
+{
+	bSelected = bInSelected;
+	ApplyLook(bShowingFocus || bSelected);
+}
+
+void USokobanButton::ApplyLook(bool bHighlighted)
+{
+	SetStyle(SokobanStyle::ButtonStyle(bHighlighted, Tone));
+	// The focused button stands out a little, as if lifted towards the player.
+	SetRenderScale(FVector2D(bShowingFocus ? 1.04f : 1.f));
 }

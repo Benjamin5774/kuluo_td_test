@@ -6,6 +6,7 @@
 		"03_turn_the_corner.json",
 		"04_two_slots.json",
 		"05_break_the_row.json",
-		"06_hold_the_switch.json"
+		"06_hold_the_switch.json",
+		"07_inside_outside.json"
 	]
 }

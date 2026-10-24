@@ -16,6 +16,12 @@ namespace
 {
 	/** Room left on either side of the canvas for the editor's tool columns, in cells. */
 	constexpr float ToolRoom = 2.5f;
+
+	/** Said when a brush other than the wall is refused on the canvas edge. */
+	FText EdgeMessage()
+	{
+		return LOCTEXT("EdgeWallsOnly", "最外圈只能放墙：淡红色的格子外面没有东西能把它围住");
+	}
 }
 
 ASokobanLevelEditor::ASokobanLevelEditor()
@@ -97,19 +103,30 @@ void ASokobanLevelEditor::Tick(float DeltaSeconds)
 		return;
 	}
 
+	// The cursor turns red over a cell the brush can't paint (the edge takes only walls), as it does for erasing.
 	const TOptional<FIntPoint> Hovered = CellUnderMouse();
-	Board->SetCanvasCursor(Hovered, bStroking ? bStrokeErase : Brush == ESokobanBrush::Erase);
+	const ESokobanBrush Active = bStroking && bStrokeErase ? ESokobanBrush::Erase : Brush;
+	Board->SetCanvasCursor(Hovered, Active == ESokobanBrush::Erase || (Hovered.IsSet() && !Canvas.CanPaint(Hovered.GetValue(), Active)));
 	if (bStroking && Hovered.IsSet() && Hovered != LastStrokeCell)
 	{
 		LastStrokeCell = Hovered;
-		if (Canvas.Paint(Hovered.GetValue(), bStrokeErase ? ESokobanBrush::Erase : Brush))
+		USokobanAudioSubsystem* Audio = USokobanAudioSubsystem::Get(this);
+		if (Canvas.Paint(Hovered.GetValue(), Active))
 		{
 			// A soft tick per painted cell, lower when erasing.
-			if (USokobanAudioSubsystem* Audio = USokobanAudioSubsystem::Get(this))
+			if (Audio)
 			{
 				Audio->Play(ESokobanSound::Click, 0.3f, bStrokeErase ? 0.8f : 1.15f);
 			}
 			Changed(false);
+		}
+		else if (!Canvas.CanPaint(Hovered.GetValue(), Active))
+		{
+			if (Audio)
+			{
+				Audio->Play(ESokobanSound::Bump, 0.35f);
+			}
+			SetMessage(EdgeMessage(), true);
 		}
 	}
 }
@@ -183,6 +200,7 @@ void ASokobanLevelEditor::WallIn()
 
 void ASokobanLevelEditor::PaintRect(const FIntPoint& From, const FIntPoint& To, ESokobanBrush InBrush)
 {
+	bool bRefused = false;
 	ApplyChange([&](FSokobanEditCanvas& Target)
 	{
 		bool bAny = false;
@@ -190,11 +208,17 @@ void ASokobanLevelEditor::PaintRect(const FIntPoint& From, const FIntPoint& To, 
 		{
 			for (int32 X = FMath::Min(From.X, To.X); X <= FMath::Max(From.X, To.X); ++X)
 			{
-				bAny |= Target.Paint(FIntPoint(X, Y), InBrush);
+				const FIntPoint Cell(X, Y);
+				bRefused |= Target.IsInside(Cell) && !Target.CanPaint(Cell, InBrush);
+				bAny |= Target.Paint(Cell, InBrush);
 			}
 		}
 		return bAny;
 	});
+	if (bRefused)
+	{
+		SetMessage(EdgeMessage(), true);
+	}
 }
 
 void ASokobanLevelEditor::ApplyChange(TFunctionRef<bool(FSokobanEditCanvas&)> Change)
@@ -467,8 +491,8 @@ FText ASokobanLevelEditor::DescribeIssue(ESokobanCanvasIssue Issue, const FSokob
 		return LOCTEXT("NoHero", "还没有放大橘（笔刷 5）");
 	case ESokobanCanvasIssue::NoGoal:
 		return LOCTEXT("NoGoal", "还没有目标点（笔刷 4）");
-	case ESokobanCanvasIssue::TrapdoorWithoutPlate:
-		return LOCTEXT("NoPlate", "有活板门但还没有机关（笔刷 6）");
+	case ESokobanCanvasIssue::BarrierWithoutPlate:
+		return LOCTEXT("NoPlate", "有机关方块但还没有机关（笔刷 6）");
 	case ESokobanCanvasIssue::TooFewCrates:
 		return FText::Format(LOCTEXT("TooFewCrates", "目标点比箱子多：{0} 个目标点，{1} 个箱子"), Canvas.CountGoals(), Canvas.CountCrates());
 	default:

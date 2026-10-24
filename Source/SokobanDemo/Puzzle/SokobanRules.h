@@ -56,12 +56,12 @@ struct SOKOBANDEMO_API FSokobanRules
 	static bool ArePlatesHeld(const FSokobanLayout& Layout, const FSokobanBoardState& State);
 
 	/**
-	 * Whether the trapdoor at Cell is open: while every plate is held, and for as long as something stands on it
-	 * (it can't close on a crate or a hero).
+	 * Whether the barrier at Cell is down (passable): while every plate is held, and for as long as something stands
+	 * in it (it can't rise through a crate or a hero).
 	 */
-	static bool IsTrapdoorOpen(const FSokobanLayout& Layout, const FSokobanBoardState& State, const FIntPoint& Cell);
+	static bool IsBarrierDown(const FSokobanLayout& Layout, const FSokobanBoardState& State, const FIntPoint& Cell);
 
-	/** Whether a hero or a crate may move into Cell, as far as the terrain goes: floor, and no closed trapdoor. */
+	/** Whether a hero or a crate may move into Cell, as far as the terrain goes: floor, and no barrier standing. */
 	static bool CanEnter(const FSokobanLayout& Layout, const FSokobanBoardState& State, const FIntPoint& Cell);
 
 	/** Most stars a solve can earn. */

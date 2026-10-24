@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "UI/SokobanUIStyle.h"
 #include "SokobanEditorWidget.generated.h"
 
 class ASokobanLevelEditor;
@@ -41,8 +42,8 @@ protected:
 	virtual void NativeDestruct() override;
 
 private:
-	/** A button in a tool column: Label, at least Width wide, running Action. */
-	USokobanButton* AddToolButton(UPanelWidget* Column, const FText& Label, float Width, TFunction<void()> Action);
+	/** A button in a tool column: Label (after Icon, when given), at least Width wide, running Action. */
+	USokobanButton* AddToolButton(UPanelWidget* Column, const FText& Label, float Width, TFunction<void()> Action, const TCHAR* Icon = nullptr, ESokobanButtonTone Tone = ESokobanButtonTone::Paper);
 
 	UFUNCTION()
 	void HandleNameCommitted(const FText& Text, ETextCommit::Type CommitMethod);

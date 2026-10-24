@@ -80,7 +80,7 @@ public:
 
 	/**
 	 * Dev: in the editor, paints the rectangle from (X, Y) to (X2, Y2) (or just the cell when X2 < 0) with Brush
-	 * (floor, wall, crate, goal, hero, plate, trapdoor or erase) after Delay seconds.
+	 * (floor, wall, crate, goal, hero, plate, barrier or erase) after Delay seconds.
 	 */
 	UFUNCTION(Exec)
 	void SokobanEdit(const FString& Brush, int32 X, int32 Y, int32 X2 = -1, int32 Y2 = -1, float Delay = 0.f);

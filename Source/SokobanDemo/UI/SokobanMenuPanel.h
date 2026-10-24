@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "UI/SokobanUIStyle.h"
 #include "SokobanMenuPanel.generated.h"
 
 class UBorder;
@@ -19,11 +20,12 @@ struct FSokobanMenuItem
 	FText Label;
 	TFunction<void()> OnActivated;
 	bool bEnabled = true;
+	ESokobanButtonTone Tone = ESokobanButtonTone::Paper;
 };
 
 /**
- * Centred panel with a title, an optional row of rating stars, an optional message and a column of buttons:
- * main menu, pause, results.
+ * Centred paper panel with its title on a ribbon, an optional row of rating stars, an optional message and a column
+ * of buttons: pause, results, the editor's home.
  */
 UCLASS()
 class SOKOBANDEMO_API USokobanMenuPanel : public UUserWidget
@@ -55,8 +57,9 @@ private:
 	/** Poses the stars, glows and sparks, and jolts the panel, StarClock seconds into the reveal. */
 	void AnimateStars();
 
+	/** The panel with its ribbon, jolted as the stars land. */
 	UPROPERTY(Transient)
-	TObjectPtr<UBorder> PanelBorder;
+	TObjectPtr<UWidget> PanelFrame;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> TitleText;

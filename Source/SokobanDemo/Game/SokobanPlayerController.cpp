@@ -2,6 +2,7 @@
 
 #include "Game/SokobanPlayerController.h"
 #include "SokobanDemo.h"
+#include "Game/SokobanAudioSubsystem.h"
 #include "Game/SokobanGameMode.h"
 #include "Game/SokobanProgressSubsystem.h"
 #include "LevelEditor/SokobanLevelEditor.h"
@@ -57,26 +58,26 @@ namespace
 			return LOCTEXT("DraftNoGoal", "还没有目标点");
 		case ESokobanCanvasIssue::TooFewCrates:
 			return LOCTEXT("DraftFewCrates", "箱子不够");
-		case ESokobanCanvasIssue::TrapdoorWithoutPlate:
-			return LOCTEXT("DraftNoPlate", "活板门缺机关");
+		case ESokobanCanvasIssue::BarrierWithoutPlate:
+			return LOCTEXT("DraftNoPlate", "方块缺机关");
 		default:
 			return LOCTEXT("DraftOpen", "墙没围好");
 		}
 	}
 
-	/** Dev commands: a brush by name (floor, wall, crate, goal, hero, plate, trapdoor or erase). */
+	/** Dev commands: a brush by name (floor, wall, crate, goal, hero, plate, barrier or erase). */
 	bool ParseBrush(const FString& Name, ESokobanBrush& OutBrush)
 	{
 		static const TMap<FString, ESokobanBrush> Names = {
 			{ TEXT("floor"), ESokobanBrush::Floor }, { TEXT("wall"), ESokobanBrush::Wall }, { TEXT("crate"), ESokobanBrush::Crate },
 			{ TEXT("goal"), ESokobanBrush::Goal }, { TEXT("hero"), ESokobanBrush::Hero }, { TEXT("plate"), ESokobanBrush::Plate },
-			{ TEXT("trapdoor"), ESokobanBrush::Trapdoor }, { TEXT("erase"), ESokobanBrush::Erase } };
+			{ TEXT("barrier"), ESokobanBrush::Barrier }, { TEXT("erase"), ESokobanBrush::Erase } };
 		if (const ESokobanBrush* Found = Names.Find(Name.ToLower()))
 		{
 			OutBrush = *Found;
 			return true;
 		}
-		UE_LOG(LogSokoban, Warning, TEXT("Unknown brush '%s' (floor, wall, crate, goal, hero, plate, trapdoor or erase)."), *Name);
+		UE_LOG(LogSokoban, Warning, TEXT("Unknown brush '%s' (floor, wall, crate, goal, hero, plate, barrier or erase)."), *Name);
 		return false;
 	}
 
@@ -586,21 +587,8 @@ void ASokobanPlayerController::HandlePuzzleChanged()
 
 	const FSokobanLevel& Level = GameMode->GetPuzzle().GetLevel();
 	const bool bCampaign = GameMode->GetPlayContext() == ESokobanPlayContext::Campaign;
-	HUD->SetLevelTitle(bCampaign
-		? FText::Format(LOCTEXT("LevelTitle", "第 {0} 关 · {1}"), GameMode->GetLevelIndex() + 1, FText::FromString(Level.Name))
-		: FText::Format(LOCTEXT("TestTitle", "试玩 · {0}"), FText::FromString(Level.Name)));
-
-	TArray<FText> Stats;
-	Stats.Add(FText::Format(LOCTEXT("Moves", "步数 {0}"), GameMode->GetPuzzle().GetState().MoveCount));
-	if (Level.Par > 0)
-	{
-		Stats.Add(FText::Format(LOCTEXT("Par", "满星 {0}"), Level.Par));
-	}
-	if (const int32 Best = bCampaign ? GameMode->GetBestMoves(GameMode->GetLevelIndex()) : 0)
-	{
-		Stats.Add(FText::Format(LOCTEXT("Best", "最佳 {0}"), Best));
-	}
-	HUD->SetStats(FText::Join(FText::FromString(TEXT("      ")), Stats));
+	HUD->SetLevel(bCampaign ? FText::AsNumber(GameMode->GetLevelIndex() + 1) : LOCTEXT("TestBadge", "试玩"), FText::FromString(Level.Name));
+	HUD->SetStats(GameMode->GetPuzzle().GetState().MoveCount, Level.Par, bCampaign ? GameMode->GetBestMoves(GameMode->GetLevelIndex()) : 0);
 }
 
 void ASokobanPlayerController::PresentMainMenu(bool bIntro)
@@ -779,10 +767,14 @@ void ASokobanPlayerController::PresentResults()
 	MenuPanel->SetVisibility(ESlateVisibility::Visible);
 	FocusUI();
 	MenuPanel->Present(Result.bLastLevel ? LOCTEXT("AllClear", "全部完成！") : LOCTEXT("Clear", "过关！"), FText::Join(FText::FromString(TEXT("\n")), Lines), MoveTemp(Items), MoveTemp(OnBack));
-	// A drawing nobody has solved yet has no par to rate against.
+	// A drawing nobody has solved yet has no par to rate against (and no stars to keep the music waiting for).
 	if (Context == ESokobanPlayContext::Campaign || Result.Par > 0)
 	{
 		MenuPanel->ShowStars(Result.Stars);
+	}
+	else if (USokobanAudioSubsystem* Audio = USokobanAudioSubsystem::Get(this))
+	{
+		Audio->ResumeMusic(1.f);
 	}
 }
 
@@ -834,13 +826,13 @@ void ASokobanPlayerController::PresentShelf()
 		if (bSaved)
 		{
 			Row.Info = FText::Format(LOCTEXT("SavedInfo", "{0} · 满星 {1} 步 · {2}"), Size, Data.Par, DescribeModified(Entry.Modified));
-			Row.Actions.Add({ LOCTEXT("ShelfTest", "试玩"), [GameMode, Data]() { if (GameMode.IsValid()) { GameMode->TestPlayShelfLevel(Data); } } });
+			Row.Actions.Add({ LOCTEXT("ShelfTest", "试玩"), [GameMode, Data]() { if (GameMode.IsValid()) { GameMode->TestPlayShelfLevel(Data); } }, true, ESokobanButtonTone::Sea });
 			Row.Actions.Add({ LOCTEXT("ShelfEdit", "编辑"), [GameMode, Data]() { if (GameMode.IsValid()) { GameMode->EditShelfLevel(ESokobanShelf::Saved, Data); } } });
 		}
 		else
 		{
 			Row.Info = FText::Format(LOCTEXT("DraftInfo", "{0} · {1} · {2}"), Size, DescribeDraft(Canvas), DescribeModified(Entry.Modified));
-			Row.Actions.Add({ LOCTEXT("ShelfContinue", "继续编辑"), [GameMode, Data]() { if (GameMode.IsValid()) { GameMode->EditShelfLevel(ESokobanShelf::Drafts, Data); } } });
+			Row.Actions.Add({ LOCTEXT("ShelfContinue", "继续编辑"), [GameMode, Data]() { if (GameMode.IsValid()) { GameMode->EditShelfLevel(ESokobanShelf::Drafts, Data); } }, true, ESokobanButtonTone::Sea });
 		}
 		Row.Actions.Add({ LOCTEXT("ShelfDelete", "删除"), [GameMode, WeakThis, Shelf, Data]()
 		{
@@ -853,7 +845,7 @@ void ASokobanPlayerController::PresentShelf()
 				LOCTEXT("DeleteMessage", "删除后就找不回来了。"), LOCTEXT("DeleteConfirm", "删除"),
 				[GameMode, Shelf, Id = Data.Id, BackToList]() { if (GameMode.IsValid()) { GameMode->DeleteShelfLevel(Shelf, Id); } BackToList(); },
 				BackToList);
-		} });
+		}, true, ESokobanButtonTone::Coral });
 	}
 
 	MenuPanel->SetVisibility(ESlateVisibility::Collapsed);
@@ -875,7 +867,8 @@ void ASokobanPlayerController::PresentConfirm(const FText& Title, const FText& M
 	// Cancel comes first and takes the focus, so a stray Enter doesn't confirm.
 	TArray<FSokobanMenuItem> Items;
 	Items.Add({ LOCTEXT("Cancel", "取消"), OnCancel });
-	Items.Add({ ConfirmLabel, MoveTemp(OnConfirm) });
+	// Whatever is confirmed here can't be undone (a deleted level, progress started over): coral.
+	Items.Add({ ConfirmLabel, MoveTemp(OnConfirm), true, ESokobanButtonTone::Coral });
 
 	LevelSelect->SetVisibility(ESlateVisibility::Collapsed);
 	ShelfScreen->SetVisibility(ESlateVisibility::Collapsed);

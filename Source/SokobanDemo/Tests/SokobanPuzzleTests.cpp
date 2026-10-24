@@ -42,10 +42,10 @@ namespace SokobanTest
 	}
 
 	/**
-	 * A trapdoor (T) in the corridor to the goal and a plate (P) in the corner below; the spare crate has to stay on
+	 * A barrier (B) in the corridor to the goal and a plate (P) in the corner below; the spare crate has to stay on
 	 * the plate while the other one goes through.
 	 */
-	bool ParseTrapdoorLevel(FAutomationTestBase& Test, FSokobanLevel& OutLevel)
+	bool ParseBarrierLevel(FAutomationTestBase& Test, FSokobanLevel& OutLevel)
 	{
 		return Parse(Test, {
 			TEXT("##########"),
@@ -53,7 +53,7 @@ namespace SokobanTest
 			TEXT("# $  #####"),
 			TEXT("##########") }, OutLevel, {
 			TEXT(""),
-			TEXT("      T"),
+			TEXT("      B"),
 			TEXT("    P") });
 	}
 }
@@ -279,67 +279,67 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSokobanMechanismParseTest, "Sokoban.Level.Mech
 bool FSokobanMechanismParseTest::RunTest(const FString& Parameters)
 {
 	FSokobanLevel Level;
-	if (!SokobanTest::ParseTrapdoorLevel(*this, Level))
+	if (!SokobanTest::ParseBarrierLevel(*this, Level))
 	{
 		return false;
 	}
 	TestTrue(TEXT("The plate is found"), Level.Layout.Plates == TArray<FIntPoint>{ FIntPoint(4, 2) });
-	TestTrue(TEXT("The trapdoor is found"), Level.Layout.Trapdoors == TArray<FIntPoint>{ FIntPoint(6, 1) });
+	TestTrue(TEXT("The barrier is found"), Level.Layout.Barriers == TArray<FIntPoint>{ FIntPoint(6, 1) });
 	TestTrue(TEXT("Mechanisms are floor"), Level.Layout.IsFloor({ 4, 2 }) && Level.Layout.IsFloor({ 6, 1 }));
 
 	const FSokobanLevelData Saved = Level.ToData();
 	FSokobanLevel Reloaded;
 	FString Error;
 	TestTrue(TEXT("Saved level parses again"), FSokobanLevel::FromData(Saved, Reloaded, Error));
-	TestTrue(TEXT("Mechanisms survive the round trip"), Reloaded.Layout.Plates == Level.Layout.Plates && Reloaded.Layout.Trapdoors == Level.Layout.Trapdoors);
+	TestTrue(TEXT("Mechanisms survive the round trip"), Reloaded.Layout.Plates == Level.Layout.Plates && Reloaded.Layout.Barriers == Level.Layout.Barriers);
 	TestTrue(TEXT("Terrain survives the round trip"), Reloaded.Layout.Tiles == Level.Layout.Tiles);
 
 	const auto Map = { TEXT("#######"), TEXT("#@$ .##"), TEXT("#######") };
-	TestFalse(TEXT("A trapdoor without a plate is rejected"), SokobanTest::ParseError(Map, { TEXT(""), TEXT("   T") }).IsEmpty());
-	TestFalse(TEXT("A mechanism on a wall is rejected"), SokobanTest::ParseError(Map, { TEXT("P"), TEXT("   T") }).IsEmpty());
-	TestFalse(TEXT("A mechanism on a goal is rejected"), SokobanTest::ParseError(Map, { TEXT(""), TEXT("   TP") }).IsEmpty());
+	TestFalse(TEXT("A barrier without a plate is rejected"), SokobanTest::ParseError(Map, { TEXT(""), TEXT("   B") }).IsEmpty());
+	TestFalse(TEXT("A mechanism on a wall is rejected"), SokobanTest::ParseError(Map, { TEXT("P"), TEXT("   B") }).IsEmpty());
+	TestFalse(TEXT("A mechanism on a goal is rejected"), SokobanTest::ParseError(Map, { TEXT(""), TEXT("   BP") }).IsEmpty());
 	TestFalse(TEXT("An unknown mechanism is rejected"), SokobanTest::ParseError(Map, { TEXT(""), TEXT("   X") }).IsEmpty());
 	TestTrue(TEXT("A plate on its own is fine"), SokobanTest::ParseError(Map, { TEXT(""), TEXT("   P") }).IsEmpty());
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSokobanTrapdoorTest, "Sokoban.Rules.Trapdoor", SokobanTest::Flags)
-bool FSokobanTrapdoorTest::RunTest(const FString& Parameters)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSokobanBarrierTest, "Sokoban.Rules.Barrier", SokobanTest::Flags)
+bool FSokobanBarrierTest::RunTest(const FString& Parameters)
 {
 	FSokobanLevel Level;
-	if (!SokobanTest::ParseTrapdoorLevel(*this, Level))
+	if (!SokobanTest::ParseBarrierLevel(*this, Level))
 	{
 		return false;
 	}
 	const FSokobanLayout& Layout = Level.Layout;
-	const FIntPoint Trapdoor(6, 1);
+	const FIntPoint Barrier(6, 1);
 	const FIntPoint Plate(4, 2);
 
 	FSokobanBoardState State = Level.InitialState;
-	TestFalse(TEXT("Closed while the plate is empty"), FSokobanRules::IsTrapdoorOpen(Layout, State, Trapdoor));
+	TestFalse(TEXT("Standing while the plate is empty"), FSokobanRules::IsBarrierDown(Layout, State, Barrier));
 	for (int32 Step = 0; Step < 3; ++Step)
 	{
 		FSokobanRules::TryMove(Layout, State, 0, ESokobanDirection::East);
 	}
 	FSokobanMoveResult Move = FSokobanRules::TryMove(Layout, State, 0, ESokobanDirection::East);
-	TestTrue(TEXT("A closed trapdoor stops the row"), Move.Outcome == ESokobanMoveOutcome::Blocked && State.Crates[0] == FIntPoint(5, 1));
+	TestTrue(TEXT("A standing barrier stops the row"), Move.Outcome == ESokobanMoveOutcome::Blocked && State.Crates[0] == FIntPoint(5, 1));
 
 	FSokobanBoardState HeroOnPlate = Level.InitialState;
 	HeroOnPlate.Heroes[0].Cell = Plate;
-	TestTrue(TEXT("The hero holds the plate down too"), FSokobanRules::IsTrapdoorOpen(Layout, HeroOnPlate, Trapdoor));
+	TestTrue(TEXT("The hero holds the plate down too"), FSokobanRules::IsBarrierDown(Layout, HeroOnPlate, Barrier));
 
 	FSokobanBoardState CrateOnPlate = Level.InitialState;
 	CrateOnPlate.Crates[1] = Plate;
-	TestTrue(TEXT("A crate on the plate opens it"), FSokobanRules::IsTrapdoorOpen(Layout, CrateOnPlate, Trapdoor));
+	TestTrue(TEXT("A crate on the plate lowers it"), FSokobanRules::IsBarrierDown(Layout, CrateOnPlate, Barrier));
 
 	FSokobanBoardState Jammed = Level.InitialState;
-	Jammed.Crates[0] = Trapdoor;
-	TestTrue(TEXT("It can't close on a crate standing in it"), FSokobanRules::IsTrapdoorOpen(Layout, Jammed, Trapdoor));
+	Jammed.Crates[0] = Barrier;
+	TestTrue(TEXT("It can't rise through a crate standing in it"), FSokobanRules::IsBarrierDown(Layout, Jammed, Barrier));
 	TestTrue(TEXT("Ordinary floor can always be entered"), FSokobanRules::CanEnter(Layout, Level.InitialState, { 5, 1 }));
 
 	// Park the spare crate on the plate (in a corner, which the solver must allow), then push the other one through.
 	const FSokobanSolveResult Result = FSokobanSolver::Solve(Layout, Level.InitialState);
-	TestTrue(TEXT("The level is solved through the trapdoor"), Result.bSolved);
+	TestTrue(TEXT("The level is solved through the barrier"), Result.bSolved);
 	TestEqual(TEXT("Shortest solution length"), Result.Moves.Num(), 8);
 	return true;
 }

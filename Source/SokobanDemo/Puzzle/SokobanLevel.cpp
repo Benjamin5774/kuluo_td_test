@@ -147,7 +147,7 @@ bool FSokobanLevel::FromData(const FSokobanLevelData& Data, FSokobanLevel& OutLe
 			{
 				continue;
 			}
-			if (Char != TEXT('P') && Char != TEXT('T'))
+			if (Char != TEXT('P') && Char != TEXT('B'))
 			{
 				OutError = FString::Printf(TEXT("Unknown mechanism '%c' at row %d, column %d."), Char, Y + 1, X + 1);
 				return false;
@@ -160,7 +160,7 @@ bool FSokobanLevel::FromData(const FSokobanLevelData& Data, FSokobanLevel& OutLe
 				OutError = FString::Printf(TEXT("The mechanism at row %d, column %d must sit on plain floor (not a wall, a goal or outside the map)."), Y + 1, X + 1);
 				return false;
 			}
-			(Char == TEXT('P') ? Layout.Plates : Layout.Trapdoors).Add(Cell);
+			(Char == TEXT('P') ? Layout.Plates : Layout.Barriers).Add(Cell);
 			bOpen[Index] = true;
 			Seeds.Add(Cell);
 		}
@@ -195,9 +195,9 @@ bool FSokobanLevel::FromData(const FSokobanLevelData& Data, FSokobanLevel& OutLe
 		OutError = FString::Printf(TEXT("%d goals but only %d crates: the level can never be solved."), Layout.Goals.Num(), State.Crates.Num());
 		return false;
 	}
-	if (Layout.Trapdoors.Num() > 0 && Layout.Plates.Num() == 0)
+	if (Layout.Barriers.Num() > 0 && Layout.Plates.Num() == 0)
 	{
-		OutError = TEXT("The map has trapdoors ('T') but no pressure plate ('P') to open them.");
+		OutError = TEXT("The map has barriers ('B') but no pressure plate ('P') to lower them.");
 		return false;
 	}
 	return true;
@@ -216,7 +216,7 @@ FSokobanLevelData FSokobanLevel::ToData() const
 	// Floor reachable from a piece, goal or mechanism can be written as plain spaces; any other floor needs an explicit '-'.
 	TArray<FIntPoint> Seeds = Layout.Goals;
 	Seeds.Append(Layout.Plates);
-	Seeds.Append(Layout.Trapdoors);
+	Seeds.Append(Layout.Barriers);
 	Seeds.Append(InitialState.Crates);
 	for (const FSokobanHeroState& Hero : InitialState.Heroes)
 	{
@@ -257,7 +257,7 @@ FSokobanLevelData FSokobanLevel::ToData() const
 		Data.Map.Add(Row.TrimEnd());
 	}
 
-	if (Layout.Plates.Num() > 0 || Layout.Trapdoors.Num() > 0)
+	if (Layout.Plates.Num() > 0 || Layout.Barriers.Num() > 0)
 	{
 		for (int32 Y = 0; Y < Size.Y; ++Y)
 		{
@@ -265,7 +265,7 @@ FSokobanLevelData FSokobanLevel::ToData() const
 			for (int32 X = 0; X < Size.X; ++X)
 			{
 				const FIntPoint Cell(X, Y);
-				Row.AppendChar(Layout.IsPlate(Cell) ? TEXT('P') : (Layout.IsTrapdoor(Cell) ? TEXT('T') : TEXT(' ')));
+				Row.AppendChar(Layout.IsPlate(Cell) ? TEXT('P') : (Layout.IsBarrier(Cell) ? TEXT('B') : TEXT(' ')));
 			}
 			Data.Mechanisms.Add(Row.TrimEnd());
 		}

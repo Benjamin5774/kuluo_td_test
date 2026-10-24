@@ -13,10 +13,22 @@ namespace
 {
 	/** Music and sea levels, and how long they take to change. */
 	constexpr float TitleMusicVolume = 0.5f;
-	constexpr float GameMusicVolume = 0.36f;
+	constexpr float GameMusicVolume = 0.18f;
 	constexpr float TitleSeaVolume = 0.6f;
 	constexpr float GameSeaVolume = 0.22f;
 	constexpr float MusicFadeTime = 1.4f;
+
+	/**
+	 * Held music dips this fast to this level before it pauses, so it doesn't stop with a click. Not quite silent: a
+	 * sound that goes fully silent may be dropped and start over when it comes back.
+	 */
+	constexpr float HoldDipTime = 0.25f;
+	constexpr float HoldDipVolume = 0.002f;
+
+	float MusicVolume(ESokobanMusic Music)
+	{
+		return Music == ESokobanMusic::Title ? TitleMusicVolume : GameMusicVolume;
+	}
 
 	USoundBase* LoadSound(const TCHAR* Name)
 	{
@@ -43,8 +55,8 @@ void USokobanAudioSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	Register(ESokobanSound::Push, { TEXT("sfx_push") });
 	Register(ESokobanSound::Goal, { TEXT("sfx_goal") });
 	Register(ESokobanSound::Plate, { TEXT("sfx_plate") });
-	Register(ESokobanSound::TrapdoorOpen, { TEXT("sfx_trapdoor_open") });
-	Register(ESokobanSound::TrapdoorClose, { TEXT("sfx_trapdoor_close") });
+	Register(ESokobanSound::BarrierDown, { TEXT("sfx_barrier_down") });
+	Register(ESokobanSound::BarrierUp, { TEXT("sfx_barrier_up") });
 	Register(ESokobanSound::Bump, { TEXT("sfx_bump") });
 	Register(ESokobanSound::Undo, { TEXT("sfx_undo") });
 	Register(ESokobanSound::Click, { TEXT("sfx_click") });
@@ -125,7 +137,8 @@ UAudioComponent* USokobanAudioSubsystem::StartLoop(USoundBase* Sound, float Volu
 
 void USokobanAudioSubsystem::SetMusic(ESokobanMusic Music)
 {
-	if (Music == CurrentMusic || !GetGameInstance()->GetWorld())
+	UWorld* World = GetGameInstance()->GetWorld();
+	if (Music == CurrentMusic || !World)
 	{
 		return;
 	}
@@ -134,13 +147,24 @@ void USokobanAudioSubsystem::SetMusic(ESokobanMusic Music)
 	if (MusicPlayer)
 	{
 		MusicPlayer->bAutoDestroy = true;
-		MusicPlayer->FadeOut(MusicFadeTime, 0.f);
+		if (bMusicHeld)
+		{
+			// Paused near silence already: nothing to fade.
+			MusicPlayer->Stop();
+		}
+		else
+		{
+			MusicPlayer->FadeOut(MusicFadeTime, 0.f);
+		}
 		MusicPlayer = nullptr;
 	}
+	bMusicHeld = false;
+	World->GetTimerManager().ClearTimer(MusicPauseTimer);
+	World->GetTimerManager().ClearTimer(MusicResumeTimer);
 	USoundBase* Track = Music == ESokobanMusic::Title ? TitleMusic.Get() : (Music == ESokobanMusic::Game ? GameMusic.Get() : nullptr);
 	if (Track)
 	{
-		MusicPlayer = StartLoop(Track, Music == ESokobanMusic::Title ? TitleMusicVolume : GameMusicVolume, MusicFadeTime);
+		MusicPlayer = StartLoop(Track, MusicVolume(Music), MusicFadeTime);
 	}
 
 	if (!SeaPlayer && Sea)
@@ -150,5 +174,46 @@ void USokobanAudioSubsystem::SetMusic(ESokobanMusic Music)
 	if (SeaPlayer)
 	{
 		SeaPlayer->AdjustVolume(2.5f, Music == ESokobanMusic::Title ? TitleSeaVolume : GameSeaVolume);
+	}
+}
+
+void USokobanAudioSubsystem::HoldMusic(float MaxHold)
+{
+	UWorld* World = GetGameInstance()->GetWorld();
+	if (!World || !MusicPlayer || bMusicHeld)
+	{
+		return;
+	}
+	bMusicHeld = true;
+	MusicPlayer->AdjustVolume(HoldDipTime, HoldDipVolume);
+	World->GetTimerManager().SetTimer(MusicPauseTimer, FTimerDelegate::CreateWeakLambda(this, [this]()
+	{
+		if (MusicPlayer && bMusicHeld)
+		{
+			MusicPlayer->SetPaused(true);
+		}
+	}), HoldDipTime, false);
+	ResumeMusic(MaxHold);
+}
+
+void USokobanAudioSubsystem::ResumeMusic(float Delay)
+{
+	UWorld* World = GetGameInstance()->GetWorld();
+	if (!World || !bMusicHeld)
+	{
+		return;
+	}
+	if (Delay > 0.f)
+	{
+		World->GetTimerManager().SetTimer(MusicResumeTimer, FTimerDelegate::CreateWeakLambda(this, [this]() { ResumeMusic(); }), Delay, false);
+		return;
+	}
+	bMusicHeld = false;
+	World->GetTimerManager().ClearTimer(MusicPauseTimer);
+	World->GetTimerManager().ClearTimer(MusicResumeTimer);
+	if (MusicPlayer)
+	{
+		MusicPlayer->SetPaused(false);
+		MusicPlayer->AdjustVolume(MusicFadeTime, MusicVolume(CurrentMusic));
 	}
 }

@@ -33,6 +33,9 @@ namespace StarReveal
 	constexpr float SparkTime = 0.5f;
 	constexpr float JoltTime = 0.22f;
 
+	/** Seconds of quiet after the last star before the music, held since the level was cleared, comes back. */
+	constexpr float MusicReturnDelay = 0.8f;
+
 	/** The middle star is bigger and sits a little higher. */
 	float StarSize(int32 Index)
 	{
@@ -48,31 +51,38 @@ void USokobanMenuPanel::NativeOnInitialized()
 	UOverlay* Root = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("Root"));
 	WidgetTree->RootWidget = Root;
 
-	// Dim the board behind the panel.
-	UBorder* Backdrop = WidgetTree->ConstructWidget<UBorder>();
-	Backdrop->SetBrush(SokobanStyle::RoundedBrush(SokobanStyle::Dim, 0.f));
+	// Darken the board behind the panel, most towards the edges.
+	UImage* Backdrop = WidgetTree->ConstructWidget<UImage>();
+	Backdrop->SetBrush(SokobanStyle::VignetteBrush());
 	UOverlaySlot* BackdropSlot = Root->AddChildToOverlay(Backdrop);
 	BackdropSlot->SetHorizontalAlignment(HAlign_Fill);
 	BackdropSlot->SetVerticalAlignment(VAlign_Fill);
 
-	PanelBorder = WidgetTree->ConstructWidget<UBorder>();
-	PanelBorder->SetBrush(SokobanStyle::RoundedBrush(SokobanStyle::Panel, 18.f));
-	PanelBorder->SetPadding(FMargin(48.f, 36.f));
-	UOverlaySlot* PanelSlot = Root->AddChildToOverlay(PanelBorder);
-	PanelSlot->SetHorizontalAlignment(HAlign_Center);
-	PanelSlot->SetVerticalAlignment(VAlign_Center);
+	// The paper panel, with the title's ribbon across its top edge.
+	UOverlay* Frame = WidgetTree->ConstructWidget<UOverlay>();
+	PanelFrame = Frame;
+	UOverlaySlot* FrameSlot = Root->AddChildToOverlay(Frame);
+	FrameSlot->SetHorizontalAlignment(HAlign_Center);
+	FrameSlot->SetVerticalAlignment(VAlign_Center);
+
+	UBorder* Panel = SokobanStyle::MakePanel(*WidgetTree, FMargin(48.f, 62.f, 48.f, 42.f));
+	UOverlaySlot* PanelSlot = Frame->AddChildToOverlay(Panel);
+	PanelSlot->SetPadding(FMargin(0.f, 40.f, 0.f, 0.f));
+
+	UTextBlock* Title = nullptr;
+	UWidget* Ribbon = SokobanStyle::MakeRibbon(*WidgetTree, FText::GetEmpty(), 36, &Title);
+	TitleText = Title;
+	UOverlaySlot* RibbonSlot = Frame->AddChildToOverlay(Ribbon);
+	RibbonSlot->SetHorizontalAlignment(HAlign_Center);
+	RibbonSlot->SetVerticalAlignment(VAlign_Top);
 
 	USizeBox* Width = WidgetTree->ConstructWidget<USizeBox>();
-	Width->SetMinDesiredWidth(420.f);
-	Width->SetMaxDesiredWidth(560.f);
-	PanelBorder->SetContent(Width);
+	Width->SetMinDesiredWidth(400.f);
+	Width->SetMaxDesiredWidth(540.f);
+	Panel->SetContent(Width);
 
 	UVerticalBox* Column = WidgetTree->ConstructWidget<UVerticalBox>();
 	Width->SetContent(Column);
-
-	TitleText = SokobanStyle::MakeText(*WidgetTree, FText::GetEmpty(), 40, true, SokobanStyle::Accent);
-	TitleText->SetJustification(ETextJustify::Center);
-	Column->AddChildToVerticalBox(TitleText)->SetHorizontalAlignment(HAlign_Fill);
 
 	// The rating row: an empty slot per star, with the earned look, its glow and its sparks stacked on top,
 	// all hidden until ShowStars reveals them.
@@ -113,7 +123,7 @@ void USokobanMenuPanel::NativeOnInitialized()
 		}
 	}
 
-	MessageText = SokobanStyle::MakeText(*WidgetTree, FText::GetEmpty(), 18);
+	MessageText = SokobanStyle::MakeText(*WidgetTree, FText::GetEmpty(), 19, ESokobanFontWeight::Medium, SokobanStyle::Ink);
 	MessageText->SetJustification(ETextJustify::Center);
 	MessageText->SetAutoWrapText(true);
 	UVerticalBoxSlot* MessageSlot = Column->AddChildToVerticalBox(MessageText);
@@ -130,7 +140,7 @@ void USokobanMenuPanel::Present(const FText& Title, const FText& Message, TArray
 {
 	StarRow->SetVisibility(ESlateVisibility::Collapsed);
 	StarClock = -1.f;
-	PanelBorder->SetRenderTranslation(FVector2D::ZeroVector);
+	PanelFrame->SetRenderTranslation(FVector2D::ZeroVector);
 
 	TitleText->SetText(Title);
 	MessageText->SetText(Message);
@@ -142,11 +152,11 @@ void USokobanMenuPanel::Present(const FText& Title, const FText& Message, TArray
 	for (FSokobanMenuItem& Item : Items)
 	{
 		USokobanButton* Button = WidgetTree->ConstructWidget<USokobanButton>();
-		Button->SetStyle(SokobanStyle::ButtonStyle());
+		Button->SetTone(Item.Tone);
 		Button->SetIsEnabled(Item.bEnabled);
 		Button->OnActivated = MoveTemp(Item.OnActivated);
 
-		UTextBlock* Label = SokobanStyle::MakeText(*WidgetTree, Item.Label, 22, true, Item.bEnabled ? SokobanStyle::Text : SokobanStyle::TextDim);
+		UTextBlock* Label = SokobanStyle::MakeText(*WidgetTree, Item.Label, 22, ESokobanFontWeight::Bold, Item.bEnabled ? SokobanStyle::Ink : SokobanStyle::InkSoft);
 		Label->SetJustification(ETextJustify::Center);
 		if (UButtonSlot* LabelSlot = Cast<UButtonSlot>(Button->SetContent(Label)))
 		{
@@ -257,13 +267,17 @@ void USokobanMenuPanel::AnimateStars()
 			Jolt = FVector2D(FMath::Sin(SinceLanding * 95.f), FMath::Cos(SinceLanding * 70.f)) * Strength;
 		}
 	}
-	PanelBorder->SetRenderTranslation(Jolt);
+	PanelFrame->SetRenderTranslation(Jolt);
 
-	// Stop once the last earned star has settled.
+	// Stop once the last earned star has settled, and let the music back in.
 	const float End = FirstDelay + FMath::Max(StarsEarned - 1, 0) * Interval + SlamTime + FMath::Max(SettleTime, SparkTime);
 	if (StarClock > End)
 	{
 		StarClock = -1.f;
+		if (USokobanAudioSubsystem* Audio = USokobanAudioSubsystem::Get(this))
+		{
+			Audio->ResumeMusic(MusicReturnDelay);
+		}
 	}
 }
 

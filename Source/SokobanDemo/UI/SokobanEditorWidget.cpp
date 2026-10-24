@@ -12,6 +12,7 @@
 #include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/Image.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -22,16 +23,6 @@
 
 namespace
 {
-	const FLinearColor Warning(1.f, 0.47f, 0.36f);
-
-	UBorder* MakePanel(UWidgetTree& Tree, const FMargin& Padding)
-	{
-		UBorder* Panel = Tree.ConstructWidget<UBorder>();
-		Panel->SetBrush(SokobanStyle::RoundedBrush(SokobanStyle::Panel, 14.f));
-		Panel->SetPadding(Padding);
-		return Panel;
-	}
-
 	void Place(UCanvasPanel* Root, UWidget* Widget, const FAnchors& Anchors, const FVector2D& Alignment, const FVector2D& Position)
 	{
 		UCanvasPanelSlot* PanelSlot = Root->AddChildToCanvas(Widget);
@@ -50,25 +41,26 @@ void USokobanEditorWidget::NativeOnInitialized()
 	WidgetTree->RootWidget = Root;
 
 	// Top left: what is being made.
-	UBorder* InfoPanel = MakePanel(*WidgetTree, FMargin(20.f, 16.f));
-	Place(Root, InfoPanel, FAnchors(0.f, 0.f), FVector2D(0.f, 0.f), FVector2D(24.f, 24.f));
+	UBorder* InfoPanel = SokobanStyle::MakePanel(*WidgetTree, FMargin(26.f, 20.f, 26.f, 26.f));
+	Place(Root, InfoPanel, FAnchors(0.f, 0.f), FVector2D(0.f, 0.f), FVector2D(20.f, 18.f));
 	UVerticalBox* Info = WidgetTree->ConstructWidget<UVerticalBox>();
 	InfoPanel->SetContent(Info);
-	Info->AddChildToVerticalBox(SokobanStyle::MakeText(*WidgetTree, LOCTEXT("Title", "关卡编辑器"), 26, true, SokobanStyle::Accent));
+	Info->AddChildToVerticalBox(SokobanStyle::MakeText(*WidgetTree, LOCTEXT("Title", "关卡编辑器"), 26, ESokobanFontWeight::Heavy));
 
 	UHorizontalBox* NameRow = WidgetTree->ConstructWidget<UHorizontalBox>();
 	Info->AddChildToVerticalBox(NameRow)->SetPadding(FMargin(0.f, 10.f, 0.f, 0.f));
-	UHorizontalBoxSlot* NameLabelSlot = NameRow->AddChildToHorizontalBox(SokobanStyle::MakeText(*WidgetTree, LOCTEXT("Name", "名称"), 16));
+	UHorizontalBoxSlot* NameLabelSlot = NameRow->AddChildToHorizontalBox(SokobanStyle::MakeText(*WidgetTree, LOCTEXT("Name", "名称"), 16, ESokobanFontWeight::Bold, SokobanStyle::InkSoft));
 	NameLabelSlot->SetVerticalAlignment(VAlign_Center);
 	NameLabelSlot->SetPadding(FMargin(0.f, 0.f, 10.f, 0.f));
 	NameBox = WidgetTree->ConstructWidget<UEditableTextBox>();
 	FEditableTextBoxStyle NameStyle;
-	NameStyle.SetFont(SokobanStyle::Font(18))
-		.SetForegroundColor(FSlateColor(SokobanStyle::Text))
-		.SetBackgroundImageNormal(SokobanStyle::RoundedBrush(SokobanStyle::ButtonNormal, 8.f))
-		.SetBackgroundImageHovered(SokobanStyle::RoundedBrush(SokobanStyle::ButtonNormal, 8.f))
-		.SetBackgroundImageFocused(SokobanStyle::RoundedBrush(FLinearColor(0.2f, 0.21f, 0.26f), 8.f))
-		.SetPadding(FMargin(10.f, 6.f));
+	NameStyle.SetFont(SokobanStyle::Font(18, ESokobanFontWeight::Bold))
+		.SetForegroundColor(FSlateColor(SokobanStyle::Ink))
+		.SetFocusedForegroundColor(FSlateColor(SokobanStyle::Ink))
+		.SetBackgroundImageNormal(SokobanStyle::PillBrush(FLinearColor::White))
+		.SetBackgroundImageHovered(SokobanStyle::PillBrush(FLinearColor::White))
+		.SetBackgroundImageFocused(SokobanStyle::PillBrush(SokobanStyle::GoldLight))
+		.SetPadding(FMargin(14.f, 5.f, 14.f, 8.f));
 	NameBox->WidgetStyle = NameStyle;
 	NameBox->OnTextCommitted.AddDynamic(this, &USokobanEditorWidget::HandleNameCommitted);
 	USizeBox* NameWidth = WidgetTree->ConstructWidget<USizeBox>();
@@ -78,7 +70,7 @@ void USokobanEditorWidget::NativeOnInitialized()
 
 	UHorizontalBox* SizeRow = WidgetTree->ConstructWidget<UHorizontalBox>();
 	Info->AddChildToVerticalBox(SizeRow)->SetPadding(FMargin(0.f, 10.f, 0.f, 0.f));
-	SizeText = SokobanStyle::MakeText(*WidgetTree, FText::GetEmpty(), 16);
+	SizeText = SokobanStyle::MakeText(*WidgetTree, FText::GetEmpty(), 16, ESokobanFontWeight::Bold, SokobanStyle::InkSoft);
 	USizeBox* SizeWidth = WidgetTree->ConstructWidget<USizeBox>();
 	SizeWidth->SetWidthOverride(110.f);
 	SizeWidth->SetContent(SizeText);
@@ -93,48 +85,53 @@ void USokobanEditorWidget::NativeOnInitialized()
 		Cast<UHorizontalBoxSlot>(Button->Slot)->SetPadding(FMargin(4.f, 0.f, 0.f, 0.f));
 	}
 
-	// Left: the brushes, in ESokobanBrush order, with their number keys.
-	UBorder* BrushPanel = MakePanel(*WidgetTree, FMargin(14.f));
-	Place(Root, BrushPanel, FAnchors(0.f, 0.5f), FVector2D(0.f, 0.5f), FVector2D(24.f, 60.f));
+	// Left: the brushes, in ESokobanBrush order, with their number keys and pictures of what they paint.
+	UBorder* BrushPanel = SokobanStyle::MakePanel(*WidgetTree, FMargin(18.f, 20.f, 18.f, 24.f));
+	Place(Root, BrushPanel, FAnchors(0.f, 0.5f), FVector2D(0.f, 0.5f), FVector2D(20.f, 64.f));
 	UVerticalBox* Brushes = WidgetTree->ConstructWidget<UVerticalBox>();
 	BrushPanel->SetContent(Brushes);
-	Brushes->AddChildToVerticalBox(SokobanStyle::MakeText(*WidgetTree, LOCTEXT("Brushes", "笔刷"), 16, true, SokobanStyle::TextDim))->SetPadding(FMargin(4.f, 0.f, 0.f, 6.f));
-	const FText BrushLabels[] = {
-		LOCTEXT("Floor", "1  地面"), LOCTEXT("Wall", "2  墙"), LOCTEXT("Crate", "3  箱子"),
-		LOCTEXT("Goal", "4  目标点"), LOCTEXT("Hero", "5  大橘"), LOCTEXT("Plate", "6  机关"),
-		LOCTEXT("Trapdoor", "7  活板门"), LOCTEXT("Erase", "8  擦除") };
+	Brushes->AddChildToVerticalBox(SokobanStyle::MakeText(*WidgetTree, LOCTEXT("Brushes", "笔刷"), 16, ESokobanFontWeight::Bold, SokobanStyle::InkSoft))->SetPadding(FMargin(10.f, 0.f, 0.f, 4.f));
+	const TPair<FText, const TCHAR*> BrushLabels[] = {
+		{ LOCTEXT("Floor", "1  地面"), TEXT("Floor") }, { LOCTEXT("Wall", "2  墙"), TEXT("Wall") }, { LOCTEXT("Crate", "3  箱子"), TEXT("Crate") },
+		{ LOCTEXT("Goal", "4  目标点"), TEXT("Goal") }, { LOCTEXT("Hero", "5  大橘"), TEXT("Hero") }, { LOCTEXT("Plate", "6  机关"), TEXT("Plate") },
+		{ LOCTEXT("Barrier", "7  机关方块"), TEXT("Barrier") }, { LOCTEXT("Erase", "8  擦除"), TEXT("Erase") } };
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(BrushLabels); ++Index)
 	{
 		const ESokobanBrush Brush = static_cast<ESokobanBrush>(Index);
-		BrushButtons.Add(AddToolButton(Brushes, BrushLabels[Index], 150.f, [this, Brush]() { if (Editor.IsValid()) { Editor->SetBrush(Brush); } }));
+		BrushButtons.Add(AddToolButton(Brushes, BrushLabels[Index].Key, 176.f, [this, Brush]() { if (Editor.IsValid()) { Editor->SetBrush(Brush); } }, BrushLabels[Index].Value));
 	}
 
-	// Right: actions.
-	UBorder* ActionPanel = MakePanel(*WidgetTree, FMargin(14.f));
-	Place(Root, ActionPanel, FAnchors(1.f, 0.5f), FVector2D(1.f, 0.5f), FVector2D(-24.f, 40.f));
+	// Right: actions; trying and keeping the level stand out.
+	UBorder* ActionPanel = SokobanStyle::MakePanel(*WidgetTree, FMargin(18.f, 20.f, 18.f, 24.f));
+	Place(Root, ActionPanel, FAnchors(1.f, 0.5f), FVector2D(1.f, 0.5f), FVector2D(-20.f, 44.f));
 	UVerticalBox* Actions = WidgetTree->ConstructWidget<UVerticalBox>();
 	ActionPanel->SetContent(Actions);
-	UndoButton = AddToolButton(Actions, LOCTEXT("Undo", "撤销  Ctrl+Z"), 170.f, [this]() { if (Editor.IsValid()) { Editor->Undo(); } });
-	RedoButton = AddToolButton(Actions, LOCTEXT("Redo", "重做  Ctrl+Y"), 170.f, [this]() { if (Editor.IsValid()) { Editor->Redo(); } });
-	AddToolButton(Actions, LOCTEXT("WallIn", "自动围墙"), 170.f, [this]() { if (Editor.IsValid()) { Editor->WallIn(); } });
-	AddToolButton(Actions, LOCTEXT("Check", "检查可解"), 170.f, [this]() { if (Editor.IsValid()) { Editor->CheckSolvable(); } });
-	TestButton = AddToolButton(Actions, LOCTEXT("Test", "试玩"), 170.f, [this]() { if (OnTestPlay) { OnTestPlay(); } });
-	AddToolButton(Actions, LOCTEXT("Save", "保存关卡"), 170.f, [this]() { if (Editor.IsValid()) { Editor->SaveLevel(); } });
-	AddToolButton(Actions, LOCTEXT("Draft", "存草稿"), 170.f, [this]() { if (Editor.IsValid()) { Editor->SaveDraft(); } });
-	AddToolButton(Actions, LOCTEXT("Back", "返回  Esc"), 170.f, [this]() { if (OnBack) { OnBack(); } });
+	UndoButton = AddToolButton(Actions, LOCTEXT("Undo", "撤销  Ctrl+Z"), 176.f, [this]() { if (Editor.IsValid()) { Editor->Undo(); } });
+	RedoButton = AddToolButton(Actions, LOCTEXT("Redo", "重做  Ctrl+Y"), 176.f, [this]() { if (Editor.IsValid()) { Editor->Redo(); } });
+	AddToolButton(Actions, LOCTEXT("WallIn", "自动围墙"), 176.f, [this]() { if (Editor.IsValid()) { Editor->WallIn(); } });
+	AddToolButton(Actions, LOCTEXT("Check", "检查可解"), 176.f, [this]() { if (Editor.IsValid()) { Editor->CheckSolvable(); } });
+	TestButton = AddToolButton(Actions, LOCTEXT("Test", "试玩"), 176.f, [this]() { if (OnTestPlay) { OnTestPlay(); } }, nullptr, ESokobanButtonTone::Sea);
+	AddToolButton(Actions, LOCTEXT("Save", "保存关卡"), 176.f, [this]() { if (Editor.IsValid()) { Editor->SaveLevel(); } }, nullptr, ESokobanButtonTone::Sea);
+	AddToolButton(Actions, LOCTEXT("Draft", "存草稿"), 176.f, [this]() { if (Editor.IsValid()) { Editor->SaveDraft(); } });
+	AddToolButton(Actions, LOCTEXT("Back", "返回  Esc"), 176.f, [this]() { if (OnBack) { OnBack(); } });
 
 	// Bottom: the status line and the controls.
-	UBorder* StatusPanel = MakePanel(*WidgetTree, FMargin(24.f, 10.f));
-	Place(Root, StatusPanel, FAnchors(0.5f, 1.f), FVector2D(0.5f, 1.f), FVector2D(0.f, -18.f));
+	UBorder* StatusPanel = SokobanStyle::MakePanel(*WidgetTree, FMargin(28.f, 12.f, 28.f, 18.f));
+	Place(Root, StatusPanel, FAnchors(0.5f, 1.f), FVector2D(0.5f, 1.f), FVector2D(0.f, -12.f));
 	UVerticalBox* StatusColumn = WidgetTree->ConstructWidget<UVerticalBox>();
 	StatusPanel->SetContent(StatusColumn);
-	StatusText = SokobanStyle::MakeText(*WidgetTree, FText::GetEmpty(), 19, true, SokobanStyle::Accent);
+	StatusText = SokobanStyle::MakeText(*WidgetTree, FText::GetEmpty(), 19, ESokobanFontWeight::Bold);
 	StatusText->SetJustification(ETextJustify::Center);
 	StatusColumn->AddChildToVerticalBox(StatusText)->SetHorizontalAlignment(HAlign_Center);
-	UTextBlock* Controls = SokobanStyle::MakeText(*WidgetTree,
-		LOCTEXT("Controls", "左键画    右键擦    1–8 换笔刷    Ctrl+Z 撤销    Ctrl+Y 重做    滚轮 缩放"), 14, false, SokobanStyle::TextDim);
-	Controls->SetJustification(ETextJustify::Center);
-	StatusColumn->AddChildToVerticalBox(Controls)->SetPadding(FMargin(0.f, 4.f, 0.f, 0.f));
+	UHorizontalBox* Controls = WidgetTree->ConstructWidget<UHorizontalBox>();
+	SokobanStyle::AddKeyHint(*WidgetTree, *Controls, LOCTEXT("KeyPaint", "左键"), LOCTEXT("Paint", "画"), false);
+	SokobanStyle::AddKeyHint(*WidgetTree, *Controls, LOCTEXT("KeyErase", "右键"), LOCTEXT("EraseHint", "擦"), false);
+	SokobanStyle::AddKeyHint(*WidgetTree, *Controls, LOCTEXT("KeyBrush", "1–8"), LOCTEXT("BrushHint", "换笔刷"), false);
+	SokobanStyle::AddKeyHint(*WidgetTree, *Controls, LOCTEXT("KeyUndo", "Ctrl+Z"), LOCTEXT("UndoHint", "撤销"), false);
+	SokobanStyle::AddKeyHint(*WidgetTree, *Controls, LOCTEXT("KeyRedo", "Ctrl+Y"), LOCTEXT("RedoHint", "重做"), false);
+	SokobanStyle::AddKeyHint(*WidgetTree, *Controls, LOCTEXT("KeyZoom", "滚轮"), LOCTEXT("ZoomHint", "缩放"), false);
+	StatusColumn->AddChildToVerticalBox(Controls)->SetPadding(FMargin(0.f, 6.f, 0.f, 0.f));
+	Cast<UVerticalBoxSlot>(Controls->Slot)->SetHorizontalAlignment(HAlign_Center);
 
 	// The panels take clicks; the board around them takes the rest.
 	SetVisibility(ESlateVisibility::SelfHitTestInvisible);
@@ -146,20 +143,29 @@ void USokobanEditorWidget::NativeOnInitialized()
 	}
 }
 
-USokobanButton* USokobanEditorWidget::AddToolButton(UPanelWidget* Column, const FText& Label, float Width, TFunction<void()> Action)
+USokobanButton* USokobanEditorWidget::AddToolButton(UPanelWidget* Column, const FText& Label, float Width, TFunction<void()> Action, const TCHAR* Icon, ESokobanButtonTone Tone)
 {
 	USokobanButton* Button = WidgetTree->ConstructWidget<USokobanButton>();
 	Button->InitFocusable(false);
-	Button->SetStyle(SokobanStyle::ButtonStyle());
+	Button->SetTone(Tone);
 	Button->OnActivated = MoveTemp(Action);
 
-	UTextBlock* Text = SokobanStyle::MakeText(*WidgetTree, Label, Width > 0.f ? 17 : 15, true);
+	UHorizontalBox* Content = WidgetTree->ConstructWidget<UHorizontalBox>();
+	if (Icon)
+	{
+		UImage* Picture = WidgetTree->ConstructWidget<UImage>();
+		Picture->SetBrush(SokobanStyle::IconBrush(Icon, 26.f));
+		UHorizontalBoxSlot* PictureSlot = Content->AddChildToHorizontalBox(Picture);
+		PictureSlot->SetVerticalAlignment(VAlign_Center);
+		PictureSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+	}
+	Content->AddChildToHorizontalBox(SokobanStyle::MakeText(*WidgetTree, Label, Width > 0.f ? 17 : 15, ESokobanFontWeight::Bold))->SetVerticalAlignment(VAlign_Center);
 	USizeBox* Box = WidgetTree->ConstructWidget<USizeBox>();
 	if (Width > 0.f)
 	{
-		Box->SetMinDesiredWidth(Width - 48.f);
+		Box->SetMinDesiredWidth(Width - 44.f);
 	}
-	Box->SetContent(Text);
+	Box->SetContent(Content);
 	Button->SetContent(Box);
 
 	Column->AddChild(Button);
@@ -211,14 +217,14 @@ void USokobanEditorWidget::Refresh()
 	// The chosen brush keeps the highlighted look.
 	for (int32 Index = 0; Index < BrushButtons.Num(); ++Index)
 	{
-		BrushButtons[Index]->SetStyle(SokobanStyle::ButtonStyle(Index == static_cast<int32>(Editor->GetBrush())));
+		BrushButtons[Index]->ShowSelected(Index == static_cast<int32>(Editor->GetBrush()));
 	}
 	UndoButton->SetIsEnabled(Editor->CanUndo());
 	RedoButton->SetIsEnabled(Editor->CanRedo());
 	TestButton->SetIsEnabled(Editor->CanTestPlay());
 
 	StatusText->SetText(Editor->GetStatus());
-	StatusText->SetColorAndOpacity(FSlateColor(Editor->IsStatusProblem() ? Warning : SokobanStyle::Accent));
+	StatusText->SetColorAndOpacity(FSlateColor(Editor->IsStatusProblem() ? SokobanStyle::Warning : SokobanStyle::Ink));
 }
 
 bool USokobanEditorWidget::IsEditingName() const

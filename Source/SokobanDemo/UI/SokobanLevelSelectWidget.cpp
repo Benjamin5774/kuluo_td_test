@@ -29,30 +29,30 @@ void USokobanLevelSelectWidget::NativeOnInitialized()
 	UOverlay* Root = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("Root"));
 	WidgetTree->RootWidget = Root;
 
-	UBorder* Backdrop = WidgetTree->ConstructWidget<UBorder>();
-	Backdrop->SetBrush(SokobanStyle::RoundedBrush(SokobanStyle::Dim, 0.f));
+	UImage* Backdrop = WidgetTree->ConstructWidget<UImage>();
+	Backdrop->SetBrush(SokobanStyle::VignetteBrush());
 	UOverlaySlot* BackdropSlot = Root->AddChildToOverlay(Backdrop);
 	BackdropSlot->SetHorizontalAlignment(HAlign_Fill);
 	BackdropSlot->SetVerticalAlignment(VAlign_Fill);
 
-	UBorder* Panel = WidgetTree->ConstructWidget<UBorder>();
-	Panel->SetBrush(SokobanStyle::RoundedBrush(SokobanStyle::Panel, 18.f));
-	Panel->SetPadding(FMargin(40.f, 32.f));
-	UOverlaySlot* PanelSlot = Root->AddChildToOverlay(Panel);
-	PanelSlot->SetHorizontalAlignment(HAlign_Center);
-	PanelSlot->SetVerticalAlignment(VAlign_Center);
+	// The paper panel, its title on a ribbon across the top edge.
+	UOverlay* Frame = WidgetTree->ConstructWidget<UOverlay>();
+	UOverlaySlot* FrameSlot = Root->AddChildToOverlay(Frame);
+	FrameSlot->SetHorizontalAlignment(HAlign_Center);
+	FrameSlot->SetVerticalAlignment(VAlign_Center);
+	UBorder* Panel = SokobanStyle::MakePanel(*WidgetTree, FMargin(40.f, 58.f, 40.f, 38.f));
+	Frame->AddChildToOverlay(Panel)->SetPadding(FMargin(0.f, 40.f, 0.f, 0.f));
+	UOverlaySlot* RibbonSlot = Frame->AddChildToOverlay(SokobanStyle::MakeRibbon(*WidgetTree, LOCTEXT("Title", "选择关卡"), 34));
+	RibbonSlot->SetHorizontalAlignment(HAlign_Center);
+	RibbonSlot->SetVerticalAlignment(VAlign_Top);
 
 	UVerticalBox* Column = WidgetTree->ConstructWidget<UVerticalBox>();
 	Panel->SetContent(Column);
 
-	UTextBlock* Title = SokobanStyle::MakeText(*WidgetTree, LOCTEXT("Title", "选择关卡"), 36, true, SokobanStyle::Accent);
-	Title->SetJustification(ETextJustify::Center);
-	Column->AddChildToVerticalBox(Title)->SetHorizontalAlignment(HAlign_Fill);
-
-	PackText = SokobanStyle::MakeText(*WidgetTree, FText::GetEmpty(), 16, false, SokobanStyle::TextDim);
+	PackText = SokobanStyle::MakeText(*WidgetTree, FText::GetEmpty(), 17, ESokobanFontWeight::Bold, SokobanStyle::InkSoft);
 	PackText->SetJustification(ETextJustify::Center);
 	UVerticalBoxSlot* PackSlot = Column->AddChildToVerticalBox(PackText);
-	PackSlot->SetPadding(FMargin(0.f, 4.f, 0.f, 18.f));
+	PackSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 14.f));
 	PackSlot->SetHorizontalAlignment(HAlign_Fill);
 
 	Grid = WidgetTree->ConstructWidget<UUniformGridPanel>();
@@ -60,14 +60,14 @@ void USokobanLevelSelectWidget::NativeOnInitialized()
 	Column->AddChildToVerticalBox(Grid)->SetHorizontalAlignment(HAlign_Center);
 
 	BackButton = WidgetTree->ConstructWidget<USokobanButton>();
-	BackButton->SetStyle(SokobanStyle::ButtonStyle());
-	UTextBlock* BackLabel = SokobanStyle::MakeText(*WidgetTree, LOCTEXT("Back", "返回"), 20, true);
+	BackButton->SetTone(ESokobanButtonTone::Paper);
+	UTextBlock* BackLabel = SokobanStyle::MakeText(*WidgetTree, LOCTEXT("Back", "返回"), 20, ESokobanFontWeight::Bold);
 	if (UButtonSlot* BackLabelSlot = Cast<UButtonSlot>(BackButton->SetContent(BackLabel)))
 	{
 		BackLabelSlot->SetHorizontalAlignment(HAlign_Center);
 	}
 	UVerticalBoxSlot* BackSlot = Column->AddChildToVerticalBox(BackButton);
-	BackSlot->SetPadding(FMargin(0.f, 22.f, 0.f, 0.f));
+	BackSlot->SetPadding(FMargin(0.f, 18.f, 0.f, 0.f));
 	BackSlot->SetHorizontalAlignment(HAlign_Center);
 }
 
@@ -85,42 +85,58 @@ void USokobanLevelSelectWidget::Present(const FText& PackName, const TArray<FSok
 		const FSokobanLevelCard& Card = Cards[Index];
 
 		USokobanButton* Button = WidgetTree->ConstructWidget<USokobanButton>();
-		Button->SetStyle(SokobanStyle::ButtonStyle());
+		Button->SetTone(ESokobanButtonTone::Paper);
 		Button->SetIsEnabled(Card.bUnlocked);
 		Button->OnActivated = [OnChosen, Index]() { OnChosen(Index); };
 
 		USizeBox* CardSize = WidgetTree->ConstructWidget<USizeBox>();
-		CardSize->SetWidthOverride(190.f);
-		CardSize->SetHeightOverride(104.f);
+		CardSize->SetWidthOverride(284.f);
+		CardSize->SetHeightOverride(96.f);
 		Button->SetContent(CardSize);
+		UHorizontalBox* Line = WidgetTree->ConstructWidget<UHorizontalBox>();
+		CardSize->SetContent(Line);
 
-		UVerticalBox* Lines = WidgetTree->ConstructWidget<UVerticalBox>();
-		CardSize->SetContent(Lines);
-
-		// The level number, with the stars earned so far (empty slots until solved) at the right.
-		UHorizontalBox* TopRow = WidgetTree->ConstructWidget<UHorizontalBox>();
-		Lines->AddChildToVerticalBox(TopRow)->SetHorizontalAlignment(HAlign_Fill);
-		const FLinearColor NumberColor = !Card.bUnlocked ? SokobanStyle::TextDim : (Card.bSolved ? SokobanStyle::Accent : SokobanStyle::Text);
-		UTextBlock* Number = SokobanStyle::MakeText(*WidgetTree, FText::AsNumber(Index + 1), 30, true, NumberColor);
-		UHorizontalBoxSlot* NumberSlot = TopRow->AddChildToHorizontalBox(Number);
-		NumberSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		// A medallion with the level's number (gold once solved, a padlock while locked)...
+		USizeBox* Medallion = WidgetTree->ConstructWidget<USizeBox>();
+		Medallion->SetWidthOverride(56.f);
+		Medallion->SetHeightOverride(56.f);
+		UOverlay* MedallionLayers = WidgetTree->ConstructWidget<UOverlay>();
+		Medallion->SetContent(MedallionLayers);
+		UImage* Disc = WidgetTree->ConstructWidget<UImage>();
+		Disc->SetBrush(SokobanStyle::CircleBrush(!Card.bUnlocked ? SokobanStyle::Grey : (Card.bSolved ? SokobanStyle::Gold : SokobanStyle::Sea), 56.f));
+		MedallionLayers->AddChildToOverlay(Disc);
+		UWidget* Mark = nullptr;
 		if (Card.bUnlocked)
 		{
-			for (int32 Star = 0; Star < FSokobanRules::MaxStars; ++Star)
-			{
-				UImage* Image = WidgetTree->ConstructWidget<UImage>();
-				Image->SetBrush(SokobanStyle::StarBrush(Star < Card.Stars, 24.f));
-				UHorizontalBoxSlot* StarSlot = TopRow->AddChildToHorizontalBox(Image);
-				StarSlot->SetVerticalAlignment(VAlign_Center);
-				StarSlot->SetPadding(FMargin(1.f, 0.f));
-			}
+			Mark = SokobanStyle::MakeSceneText(*WidgetTree, FText::AsNumber(Index + 1), 26, ESokobanFontWeight::Heavy, FLinearColor::White);
 		}
+		else
+		{
+			UImage* Lock = WidgetTree->ConstructWidget<UImage>();
+			Lock->SetBrush(SokobanStyle::IconBrush(TEXT("Lock"), 30.f));
+			Mark = Lock;
+		}
+		UOverlaySlot* MarkSlot = MedallionLayers->AddChildToOverlay(Mark);
+		MarkSlot->SetHorizontalAlignment(HAlign_Center);
+		MarkSlot->SetVerticalAlignment(VAlign_Center);
+		MarkSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f));
+		Line->AddChildToHorizontalBox(Medallion)->SetVerticalAlignment(VAlign_Center);
 
-		UTextBlock* Name = SokobanStyle::MakeText(*WidgetTree, Card.Name, 17, true, Card.bUnlocked ? SokobanStyle::Text : SokobanStyle::TextDim);
-		Lines->AddChildToVerticalBox(Name);
-
-		UTextBlock* Status = SokobanStyle::MakeText(*WidgetTree, Card.Status, 13, false, Card.bSolved ? SokobanStyle::Accent : SokobanStyle::TextDim);
-		Lines->AddChildToVerticalBox(Status)->SetPadding(FMargin(0.f, 4.f, 0.f, 0.f));
+		// ...then its name, the stars earned so far (empty slots until solved) and how it went.
+		UVerticalBox* Lines = WidgetTree->ConstructWidget<UVerticalBox>();
+		UHorizontalBoxSlot* LinesSlot = Line->AddChildToHorizontalBox(Lines);
+		LinesSlot->SetVerticalAlignment(VAlign_Center);
+		LinesSlot->SetPadding(FMargin(12.f, 0.f, 0.f, 0.f));
+		Lines->AddChildToVerticalBox(SokobanStyle::MakeText(*WidgetTree, Card.Name, 19, ESokobanFontWeight::Bold, Card.bUnlocked ? SokobanStyle::Ink : SokobanStyle::InkSoft));
+		UHorizontalBox* StarsRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+		Lines->AddChildToVerticalBox(StarsRow)->SetPadding(FMargin(0.f, 3.f, 0.f, 1.f));
+		for (int32 Star = 0; Card.bUnlocked && Star < FSokobanRules::MaxStars; ++Star)
+		{
+			UImage* Image = WidgetTree->ConstructWidget<UImage>();
+			Image->SetBrush(SokobanStyle::StarBrush(Star < Card.Stars, 22.f));
+			StarsRow->AddChildToHorizontalBox(Image)->SetPadding(FMargin(0.f, 0.f, 2.f, 0.f));
+		}
+		Lines->AddChildToVerticalBox(SokobanStyle::MakeText(*WidgetTree, Card.Status, 13, ESokobanFontWeight::Medium, SokobanStyle::InkSoft));
 
 		Grid->AddChildToUniformGrid(Button, Index / Columns, Index % Columns);
 		CardButtons.Add(Button);
