@@ -103,6 +103,11 @@ void ASokobanPlayerController::CreateInputMappings()
 	UndoAction = MakeAction(TEXT("IA_Undo"), { EKeys::Z, EKeys::BackSpace, EKeys::Gamepad_FaceButton_Right });
 	RestartAction = MakeAction(TEXT("IA_Restart"), { EKeys::R, EKeys::Gamepad_FaceButton_Top });
 	PauseAction = MakeAction(TEXT("IA_Pause"), { EKeys::Escape, EKeys::P, EKeys::Gamepad_Special_Right });
+
+	// The wheel reports one unit per notch, positive when rolled away (zoom in).
+	ZoomAction = NewObject<UInputAction>(this, TEXT("IA_Zoom"));
+	ZoomAction->ValueType = EInputActionValueType::Axis1D;
+	MappingContext->MapKey(ZoomAction, EKeys::MouseWheelAxis);
 }
 
 void ASokobanPlayerController::SetupInputComponent()
@@ -126,19 +131,32 @@ void ASokobanPlayerController::SetupInputComponent()
 	Input->BindAction(UndoAction, ETriggerEvent::Completed, this, &ASokobanPlayerController::OnUndoReleased);
 	Input->BindAction(RestartAction, ETriggerEvent::Started, this, &ASokobanPlayerController::OnRestartPressed);
 	Input->BindAction(PauseAction, ETriggerEvent::Started, this, &ASokobanPlayerController::OnPausePressed);
+	Input->BindAction(ZoomAction, ETriggerEvent::Triggered, this, &ASokobanPlayerController::OnZoom);
 }
 
 void ASokobanPlayerController::PlayerTick(float DeltaTime)
 {
 	Super::PlayerTick(DeltaTime);
 
-	if (HeldDirections.Num() > 0)
+	// Moves never cut each other short. The next one (a press kept from during the last move, a held key or
+	// solver playback) starts the moment the board is free, so consecutive steps join into one walk.
+	if (IsPlaying() && !IsBoardBusy())
 	{
-		MoveRepeatTimer -= DeltaTime;
-		if (MoveRepeatTimer <= 0.f)
+		if (BufferedMove.IsSet())
 		{
-			// Repeat as soon as the previous step has landed, so holding a key walks smoothly.
-			MoveRepeatTimer = FMath::Max(IssueMove(HeldDirections.Last()), 0.05f);
+			const ESokobanDirection Next = BufferedMove.GetValue();
+			BufferedMove.Reset();
+			IssueMove(Next);
+		}
+		else if (HeldDirections.Num() > 0 && GetWorld()->GetTimeSeconds() - LastPressTime >= MoveRepeatDelay)
+		{
+			IssueMove(HeldDirections.Last());
+		}
+		else if (AutoMoves.Num() > 0)
+		{
+			const ESokobanDirection Next = AutoMoves[0];
+			AutoMoves.RemoveAt(0);
+			IssueMove(Next);
 		}
 	}
 
@@ -147,23 +165,13 @@ void ASokobanPlayerController::PlayerTick(float DeltaTime)
 		UndoRepeatTimer -= DeltaTime;
 		if (UndoRepeatTimer <= 0.f)
 		{
-			if (ASokobanGameMode* GameMode = GetSokobanGameMode())
+			ASokobanGameMode* GameMode = GetSokobanGameMode();
+			if (GameMode && GameMode->RequestUndo())
 			{
-				GameMode->RequestUndo();
+				MarkBoardBusy();
 			}
 			CurrentUndoInterval = FMath::Max(UndoRepeatMinInterval, CurrentUndoInterval * UndoRepeatAcceleration);
 			UndoRepeatTimer = CurrentUndoInterval;
-		}
-	}
-
-	if (AutoMoves.Num() > 0 && IsPlaying())
-	{
-		AutoMoveTimer -= DeltaTime;
-		if (AutoMoveTimer <= 0.f)
-		{
-			const ESokobanDirection Next = AutoMoves[0];
-			AutoMoves.RemoveAt(0);
-			AutoMoveTimer = IssueMove(Next) + 0.06f;
 		}
 	}
 }
@@ -178,9 +186,17 @@ void ASokobanPlayerController::OnDirectionPressed(ESokobanDirection Direction)
 	AutoMoves.Reset();
 	HeldDirections.Remove(Direction);
 	HeldDirections.Add(Direction);
+	LastPressTime = GetWorld()->GetTimeSeconds();
 
-	IssueMove(Direction);
-	MoveRepeatTimer = MoveRepeatDelay;
+	if (IsBoardBusy())
+	{
+		// Keep the latest press; it plays when the running move lands.
+		BufferedMove = Direction;
+	}
+	else
+	{
+		IssueMove(Direction);
+	}
 }
 
 void ASokobanPlayerController::OnDirectionReleased(ESokobanDirection Direction)
@@ -197,7 +213,11 @@ void ASokobanPlayerController::OnUndoPressed()
 	}
 
 	AutoMoves.Reset();
-	GameMode->RequestUndo();
+	BufferedMove.Reset();
+	if (GameMode->RequestUndo())
+	{
+		MarkBoardBusy();
+	}
 	bUndoHeld = true;
 	UndoRepeatTimer = UndoRepeatDelay;
 	CurrentUndoInterval = UndoRepeatInterval;
@@ -213,7 +233,11 @@ void ASokobanPlayerController::OnRestartPressed()
 	if (ASokobanGameMode* GameMode = GetSokobanGameMode())
 	{
 		AutoMoves.Reset();
-		GameMode->RequestRestart();
+		BufferedMove.Reset();
+		if (GameMode->RequestRestart())
+		{
+			MarkBoardBusy();
+		}
 	}
 }
 
@@ -225,16 +249,37 @@ void ASokobanPlayerController::OnPausePressed()
 	}
 }
 
-float ASokobanPlayerController::IssueMove(ESokobanDirection Direction)
+void ASokobanPlayerController::OnZoom(const FInputActionValue& Value)
 {
 	ASokobanGameMode* GameMode = GetSokobanGameMode();
-	if (!GameMode)
+	if (GameMode && GameMode->GetCameraRig() && IsPlaying())
 	{
-		return 0.f;
+		GameMode->GetCameraRig()->AddZoom(Value.Get<float>());
 	}
+}
 
-	GameMode->RequestMove(Direction);
-	return GameMode->GetLastAnimationTime();
+void ASokobanPlayerController::IssueMove(ESokobanDirection Direction)
+{
+	if (ASokobanGameMode* GameMode = GetSokobanGameMode())
+	{
+		GameMode->RequestMove(Direction);
+		MarkBoardBusy();
+	}
+}
+
+bool ASokobanPlayerController::IsBoardBusy() const
+{
+	// Free from the frame the move lands in (with a hair of slack for rounding), never earlier: the board
+	// starts the next move exactly at that landing, and starting it early would hold the hero still.
+	return GetWorld()->GetTimeSeconds() + 0.001 < BoardBusyUntil;
+}
+
+void ASokobanPlayerController::MarkBoardBusy()
+{
+	if (const ASokobanGameMode* GameMode = GetSokobanGameMode())
+	{
+		BoardBusyUntil = GetWorld()->GetTimeSeconds() + GameMode->GetLastAnimationTime();
+	}
 }
 
 bool ASokobanPlayerController::IsPlaying() const
@@ -251,6 +296,8 @@ ASokobanGameMode* ASokobanPlayerController::GetSokobanGameMode() const
 void ASokobanPlayerController::HandleFlowStateChanged(ESokobanFlowState State)
 {
 	HeldDirections.Reset();
+	BufferedMove.Reset();
+	BoardBusyUntil = 0.0;
 	bUndoHeld = false;
 	if (State != ESokobanFlowState::Playing)
 	{
@@ -469,7 +516,6 @@ void ASokobanPlayerController::SokobanSolve(float Delay)
 
 		UE_LOG(LogSokoban, Log, TEXT("SokobanSolve: playing a %d-move solution."), Result.Moves.Num());
 		AutoMoves = Result.Moves;
-		AutoMoveTimer = 0.f;
 	}), FMath::Max(Delay, 0.01f), false);
 }
 
@@ -546,6 +592,19 @@ void ASokobanPlayerController::SokobanDump(float Delay)
 		{
 			UE_LOG(LogSokoban, Log, TEXT("Dump at %.2fs, move %d"), GetWorld()->GetTimeSeconds(), GameMode->GetPuzzle().GetState().MoveCount);
 			GameMode->GetBoardView()->DumpPieces(GameMode->GetPuzzle().GetState());
+		}
+	}), FMath::Max(Delay, 0.01f), false);
+}
+
+void ASokobanPlayerController::SokobanZoom(float Steps, float Delay)
+{
+	FTimerHandle Timer;
+	GetWorldTimerManager().SetTimer(Timer, FTimerDelegate::CreateWeakLambda(this, [this, Steps]()
+	{
+		ASokobanGameMode* GameMode = GetSokobanGameMode();
+		if (GameMode && GameMode->GetCameraRig())
+		{
+			GameMode->GetCameraRig()->AddZoom(Steps);
 		}
 	}), FMath::Max(Delay, 0.01f), false);
 }

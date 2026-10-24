@@ -21,7 +21,7 @@ enum class ESokobanHeroAction : uint8
 	Victory
 };
 
-/** The playable hero: the strongman (a fat cat), who shoves a whole row of crates. */
+/** The playable hero: the strongman (a chubby ginger cat), who shoves a whole row of crates. */
 UCLASS()
 class SOKOBANDEMO_API ASokobanHero : public ASokobanPiece
 {
@@ -35,8 +35,11 @@ public:
 	/** Turns towards Direction: a quick swivel, or immediately when bInstant. */
 	void SetFacing(ESokobanDirection Direction, bool bInstant);
 
-	/** Plays the clip registered for Action in the action library. */
-	void PlayAction(ESokobanHeroAction Action);
+	/**
+	 * Plays the clip registered for Action in the action library. For an action that accompanies a move,
+	 * MoveSeconds sets the pace so the clip covers ActionCyclesPerMove cycles in that time.
+	 */
+	void PlayAction(ESokobanHeroAction Action, float MoveSeconds = 0.f);
 
 	/** The body; the board's editor preview copies it for its stand-in. */
 	USkeletalMeshComponent* GetMesh() const { return Mesh; }
@@ -65,9 +68,13 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Animation")
 	TMap<ESokobanHeroAction, TObjectPtr<UAnimSequenceBase>> ActionClips;
 
-	/** Playback rate per action; 1 when missing. */
+	/** Playback rate per action that doesn't follow a move; 1 when missing. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Animation")
 	TMap<ESokobanHeroAction, float> ActionPlayRates;
+
+	/** Clip cycles per move for actions that accompany a move, so their footfalls match the glide's. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Animation")
+	TMap<ESokobanHeroAction, float> ActionCyclesPerMove;
 
 	/** Forward lean in degrees per action; 0 when missing. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Animation")

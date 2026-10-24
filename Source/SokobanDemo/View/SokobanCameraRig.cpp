@@ -4,6 +4,7 @@
 #include "Camera/CameraComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
+#include "Engine/World.h"
 
 ASokobanCameraRig::ASokobanCameraRig()
 {
@@ -30,15 +31,31 @@ void ASokobanCameraRig::Tick(float DeltaSeconds)
 		return;
 	}
 
-	// Re-frame when the window changes shape so the board always fits.
-	const float Aspect = GetViewportAspect();
-	if (!FMath::IsNearlyEqual(Aspect, FramedAspect, 0.01f))
+	// Follow the zoom, and re-frame when the window changes shape so the board always fits.
+	FramedAspect = GetViewportAspect();
+	TargetLocation = ComputeLocation(GetPitch(), GetMargin());
+
+	// Location and pitch blend at the same rate, so the board stays centred while either changes.
+	CurrentLocation = FMath::VInterpTo(CurrentLocation, TargetLocation, DeltaSeconds, BlendSpeed);
+	CurrentPitch = FMath::FInterpTo(CurrentPitch, GetPitch(), DeltaSeconds, BlendSpeed);
+
+	FVector Offset = FVector::ZeroVector;
+	const double Now = GetWorld()->GetTimeSeconds();
+	if (JoltStartTime >= 0.0 && Now >= JoltStartTime)
 	{
-		FramedAspect = Aspect;
-		TargetLocation = ComputeLocation();
+		// A few quick, fading bounces, like a heavy weight hitting the ground.
+		const float Alpha = static_cast<float>((Now - JoltStartTime) / JoltDuration);
+		if (Alpha >= 1.f)
+		{
+			JoltStartTime = -1.0;
+		}
+		else
+		{
+			Offset.Z = JoltAmplitude * JoltStrength * FMath::Sin(Alpha * 3.f * UE_TWO_PI) * FMath::Square(1.f - Alpha);
+		}
 	}
 
-	SetActorLocation(FMath::VInterpTo(GetActorLocation(), TargetLocation, DeltaSeconds, BlendSpeed));
+	SetActorLocationAndRotation(CurrentLocation + Offset, FRotator(-CurrentPitch, 0.f, 0.f));
 }
 
 void ASokobanCameraRig::FrameBounds(const FBox& Bounds, bool bInstant)
@@ -46,16 +63,42 @@ void ASokobanCameraRig::FrameBounds(const FBox& Bounds, bool bInstant)
 	FramedBounds = Bounds;
 	FramedAspect = GetViewportAspect();
 	Camera->SetFieldOfView(FieldOfView);
-	SetActorRotation(FRotator(-Pitch, 0.f, 0.f));
 
-	TargetLocation = ComputeLocation();
-	if (bInstant)
+	TargetLocation = ComputeLocation(GetPitch(), GetMargin());
+	if (bInstant || CurrentLocation.IsZero())
 	{
-		SetActorLocation(TargetLocation);
+		CurrentLocation = TargetLocation;
+		CurrentPitch = GetPitch();
+		SetActorLocationAndRotation(CurrentLocation, FRotator(-CurrentPitch, 0.f, 0.f));
 	}
 }
 
-FVector ASokobanCameraRig::ComputeLocation() const
+void ASokobanCameraRig::AddZoom(float Steps)
+{
+	Zoom = FMath::Clamp(Zoom + Steps * ZoomStep, 0.f, 1.f);
+}
+
+void ASokobanCameraRig::Jolt(float Strength, float Delay)
+{
+	if (JoltAmplitude <= 0.f || Strength <= 0.f)
+	{
+		return;
+	}
+	JoltStrength = Strength;
+	JoltStartTime = GetWorld()->GetTimeSeconds() + Delay;
+}
+
+float ASokobanCameraRig::GetPitch() const
+{
+	return FMath::Lerp(WidePitch, ClosePitch, Zoom);
+}
+
+float ASokobanCameraRig::GetMargin() const
+{
+	return FMath::Lerp(WideMargin, CloseMargin, Zoom);
+}
+
+FVector ASokobanCameraRig::ComputeLocation(float Pitch, float Margin) const
 {
 	const FRotationMatrix View(FRotator(-Pitch, 0.f, 0.f));
 	const FVector Forward = View.GetUnitAxis(EAxis::X);

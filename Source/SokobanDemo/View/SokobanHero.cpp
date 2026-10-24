@@ -1,21 +1,27 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "View/SokobanHero.h"
+#include "SokobanDemo.h"
 #include "Puzzle/SokobanGrid.h"
 #include "Animation/AnimSequenceBase.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/World.h"
+#include "HAL/IConsoleManager.h"
 #include "UObject/ConstructorHelpers.h"
+
+static TAutoConsoleVariable<bool> CVarTraceHero(TEXT("Sokoban.TraceHero"), false,
+	TEXT("Dev: logs where the hero is drawn every frame, for tuning how moves flow into one another."));
 
 ASokobanHero::ASokobanHero()
 {
-	// The strongman is a fat cat: "Cat Pilot" by Tomcat94 (OpenGameArt, CC0), fattened and given Idle and
-	// Push clips next to its own Walk and Cheer (agent tools: make_fat_cat.py, then import_fat_cat.py).
-	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BodyMesh(TEXT("/Game/Sokoban/Characters/FatCat/FatCat.FatCat"));
-	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> IdleClip(TEXT("/Game/Sokoban/Characters/FatCat/Idle.Idle"));
-	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> WalkClip(TEXT("/Game/Sokoban/Characters/FatCat/Walk.Walk"));
-	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> PushClip(TEXT("/Game/Sokoban/Characters/FatCat/Push.Push"));
-	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> VictoryClip(TEXT("/Game/Sokoban/Characters/FatCat/Cheer.Cheer"));
+	// The strongman is a chubby ginger cat, modelled, rigged and animated for this project
+	// (agent tools: make_cartoon_cat.py in Blender, then import_ginger_cat.py).
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BodyMesh(TEXT("/Game/Sokoban/Characters/GingerCat/GingerCat.GingerCat"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> IdleClip(TEXT("/Game/Sokoban/Characters/GingerCat/Idle.Idle"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> WalkClip(TEXT("/Game/Sokoban/Characters/GingerCat/Walk.Walk"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> PushClip(TEXT("/Game/Sokoban/Characters/GingerCat/Push.Push"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> VictoryClip(TEXT("/Game/Sokoban/Characters/GingerCat/Cheer.Cheer"));
 
 	Mesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("Mesh"));
 	Mesh->SetupAttachment(VisualRoot);
@@ -23,8 +29,8 @@ ASokobanHero::ASokobanHero()
 	Mesh->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 	// The model faces +Y; turn it so the actor's forward (+X) is the hero's front.
 	Mesh->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
-	// 2.56 m tall as authored: a little over a cell high, so the round little cat reads from the high camera.
-	Mesh->SetRelativeScale3D(FVector(0.46f));
+	// Authored 90 cm to the ear tips; a touch bigger reads as the burly one from the high camera.
+	Mesh->SetRelativeScale3D(FVector(1.12f));
 	if (BodyMesh.Succeeded())
 	{
 		Mesh->SetSkeletalMeshAsset(BodyMesh.Object);
@@ -46,11 +52,16 @@ ASokobanHero::ASokobanHero()
 	{
 		ActionClips.Add(ESokobanHeroAction::Victory, VictoryClip.Object);
 	}
-	// A step takes a fraction of a second, so both cycles run faster than their natural pace.
-	ActionPlayRates.Add(ESokobanHeroAction::Walk, 2.f);
-	ActionPlayRates.Add(ESokobanHeroAction::Push, 1.6f);
-	// Short arms: the whole cat leans into the crate.
-	ActionReaches.Add(ESokobanHeroAction::Push, 34.f);
+	// Both clips hold two footfalls: one step per cell, walking or pushing, timed to the move.
+	ActionCyclesPerMove.Add(ESokobanHeroAction::Walk, 0.5f);
+	ActionCyclesPerMove.Add(ESokobanHeroAction::Push, 0.5f);
+	// The push clip leans in with the arms locked forward; shift the body so the paws meet the crate.
+	ActionReaches.Add(ESokobanHeroAction::Push, 17.f);
+	// Turn quickly enough to face the new way within the first part of a step. The push clip already
+	// trembles, so the body doesn't shudder as well.
+	TurnSpeed = 1440.f;
+	SettleSquash = 0.04f;
+	StrainJitter = 0.f;
 }
 
 void ASokobanHero::AddPartsTo(USkeletalMeshComponent* Body, EComponentCreationMethod CreationMethod) const
@@ -111,6 +122,11 @@ void ASokobanHero::Tick(float DeltaSeconds)
 	const float* TargetReach = ActionReaches.Find(CurrentAction);
 	CurrentReach = FMath::FInterpTo(CurrentReach, TargetReach ? *TargetReach : 0.f, DeltaSeconds, LeanSpeed);
 	Mesh->SetRelativeLocation(FVector(CurrentReach, 0.f, 0.f));
+
+	if (CVarTraceHero.GetValueOnGameThread())
+	{
+		UE_LOG(LogSokoban, Log, TEXT("Trace %.4f %s"), GetWorld()->GetTimeSeconds(), *GetActorLocation().ToCompactString());
+	}
 }
 
 void ASokobanHero::SetFacing(ESokobanDirection Direction, bool bInstant)
@@ -122,14 +138,9 @@ void ASokobanHero::SetFacing(ESokobanDirection Direction, bool bInstant)
 	}
 }
 
-void ASokobanHero::PlayAction(ESokobanHeroAction Action)
+void ASokobanHero::PlayAction(ESokobanHeroAction Action, float MoveSeconds)
 {
 	IdleCountdown = -1.f;
-	if (bHasAction && Action == CurrentAction)
-	{
-		// Keep the clip running so consecutive steps don't restart the stride.
-		return;
-	}
 
 	const TObjectPtr<UAnimSequenceBase>* Clip = ActionClips.Find(Action);
 	if (!Clip || !*Clip)
@@ -141,11 +152,18 @@ void ASokobanHero::PlayAction(ESokobanHeroAction Action)
 		return;
 	}
 
-	CurrentAction = Action;
-	bHasAction = true;
-	Mesh->PlayAnimation(*Clip, true);
-	const float* Rate = ActionPlayRates.Find(Action);
-	Mesh->SetPlayRate(Rate ? *Rate : 1.f);
+	const float* Cycles = ActionCyclesPerMove.Find(Action);
+	const float* FixedRate = ActionPlayRates.Find(Action);
+	const float Rate = Cycles && MoveSeconds > 0.f ? (*Clip)->GetPlayLength() * *Cycles / MoveSeconds : (FixedRate ? *FixedRate : 1.f);
+
+	// Keep the clip running through consecutive moves, so the stride carries on instead of restarting.
+	if (!bHasAction || Action != CurrentAction)
+	{
+		CurrentAction = Action;
+		bHasAction = true;
+		Mesh->PlayAnimation(*Clip, true);
+	}
+	Mesh->SetPlayRate(Rate);
 }
 
 void ASokobanHero::OnMoveFinished()

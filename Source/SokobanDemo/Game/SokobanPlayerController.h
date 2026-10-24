@@ -15,11 +15,13 @@ class USokobanLevelSelectWidget;
 class USokobanMenuPanel;
 class UUserWidget;
 enum class ESokobanFlowState : uint8;
+struct FInputActionValue;
 
 /**
  * Turns input into puzzle moves and drives the UI.
- * Moves: one cell per press, steady repeats while held, hold-to-rewind with accelerating undo,
- * and a new press always cuts the running animation short. Screens follow the game mode's flow state.
+ * Moves: one cell per press and steady repeats while held. A move always plays out: a press during it is
+ * kept and played the moment it lands, so steps join into one continuous walk. Undo rewinds at once, and
+ * holding it rewinds faster and faster. Screens follow the game mode's flow state.
  */
 UCLASS()
 class SOKOBANDEMO_API ASokobanPlayerController : public APlayerController
@@ -55,6 +57,9 @@ public:
 	UFUNCTION(Exec)
 	void SokobanDump(float Delay = 0.f);
 
+	/** Dev: zooms the camera by Steps wheel notches (positive in) after Delay seconds. */
+	UFUNCTION(Exec)
+	void SokobanZoom(float Steps, float Delay = 0.f);
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
@@ -68,9 +73,9 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Sokoban|UI")
 	TSubclassOf<USokobanLevelSelectWidget> LevelSelectClass;
 
-	/** Seconds a direction must be held before it starts repeating. */
+	/** Seconds a direction must be held before it starts repeating (it repeats when the current move lands). */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Input")
-	float MoveRepeatDelay = 0.2f;
+	float MoveRepeatDelay = 0.12f;
 
 	/** Seconds the undo key must be held before rewinding continuously. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Input")
@@ -96,9 +101,17 @@ private:
 	void OnUndoReleased();
 	void OnRestartPressed();
 	void OnPausePressed();
+	void OnZoom(const FInputActionValue& Value);
 
-	/** Sends a move to the game mode and returns how long its animation lasts. */
-	float IssueMove(ESokobanDirection Direction);
+	/** Sends a move to the game mode; the next one waits until its animation has played out. */
+	void IssueMove(ESokobanDirection Direction);
+
+	/** Whether the last move, undo or restart is still animating. */
+	bool IsBoardBusy() const;
+
+	/** Notes how long the board animates after a request to the game mode. */
+	void MarkBoardBusy();
+
 	bool IsPlaying() const;
 	ASokobanGameMode* GetSokobanGameMode() const;
 
@@ -131,6 +144,9 @@ private:
 	TObjectPtr<UInputAction> PauseAction;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> ZoomAction;
+
+	UPROPERTY(Transient)
 	TObjectPtr<USokobanHUDWidget> HUD;
 
 	UPROPERTY(Transient)
@@ -141,7 +157,15 @@ private:
 
 	/** Directions currently held, most recent last; the most recent one repeats. */
 	TArray<ESokobanDirection> HeldDirections;
-	float MoveRepeatTimer = 0.f;
+
+	/** When the most recent direction was pressed (world seconds). */
+	double LastPressTime = 0.0;
+
+	/** A direction pressed while the board was busy; it plays as soon as the board is free. */
+	TOptional<ESokobanDirection> BufferedMove;
+
+	/** World time when the board's current animation ends. */
+	double BoardBusyUntil = 0.0;
 
 	bool bUndoHeld = false;
 	float UndoRepeatTimer = 0.f;
@@ -149,5 +173,4 @@ private:
 
 	/** Moves still to play back from SokobanSolve. */
 	TArray<ESokobanDirection> AutoMoves;
-	float AutoMoveTimer = 0.f;
 };

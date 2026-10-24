@@ -183,6 +183,19 @@ FSokobanMoveResult ASokobanGameMode::RequestMove(ESokobanDirection Direction)
 
 	const FSokobanMoveResult Result = Puzzle.Move(Direction);
 	LastAnimationTime = BoardView->PlayMove(Result, Puzzle.GetState());
+	if (Result.Outcome == ESokobanMoveOutcome::Pushed)
+	{
+		// A thud only when the push sets crates down on goals; the more at once, the harder.
+		int32 Landed = 0;
+		for (int32 CrateId : Result.Row)
+		{
+			Landed += Puzzle.GetLevel().Layout.IsGoal(Puzzle.GetState().Crates[CrateId]) ? 1 : 0;
+		}
+		if (Landed > 0)
+		{
+			CameraRig->Jolt(FMath::Min(0.7f + 0.3f * (Landed - 1), 1.3f), LastAnimationTime);
+		}
+	}
 	if (Result.DidMove())
 	{
 		OnPuzzleChanged.Broadcast();
@@ -223,7 +236,6 @@ bool ASokobanGameMode::RequestRestart()
 void ASokobanGameMode::HandleLevelSolved()
 {
 	bSolved = true;
-	BoardView->PlayVictory();
 
 	const FSokobanLevel& Level = Puzzle.GetLevel();
 	LastCompletion.Moves = Puzzle.GetState().MoveCount;
@@ -236,10 +248,16 @@ void ASokobanGameMode::HandleLevelSolved()
 	}
 	UE_LOG(LogSokoban, Log, TEXT("Solved %s in %d moves (par %d)%s"), *Level.Id, LastCompletion.Moves, Level.Par, LastCompletion.bNewBest ? TEXT(", new best") : TEXT(""));
 
+	// Celebrate once the final push has landed, then show the results. Both steps share ResultsTimer, so
+	// leaving the level in between cancels whichever is pending.
 	GetWorldTimerManager().SetTimer(ResultsTimer, FTimerDelegate::CreateWeakLambda(this, [this]()
 	{
-		SetFlowState(ESokobanFlowState::LevelComplete);
-	}), ResultsDelay, false);
+		BoardView->PlayVictory();
+		GetWorldTimerManager().SetTimer(ResultsTimer, FTimerDelegate::CreateWeakLambda(this, [this]()
+		{
+			SetFlowState(ESokobanFlowState::LevelComplete);
+		}), ResultsDelay, false);
+	}), FMath::Max(LastAnimationTime, 0.01f), false);
 }
 
 bool ASokobanGameMode::IsLevelUnlocked(int32 Index) const

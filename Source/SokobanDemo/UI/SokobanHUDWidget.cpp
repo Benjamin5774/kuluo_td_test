@@ -28,7 +28,7 @@ void USokobanHUDWidget::NativeOnInitialized()
 	HeaderSlot->SetPosition(FVector2D(36.f, 28.f));
 	HeaderSlot->SetAutoSize(true);
 
-	UTextBlock* Hint = SokobanStyle::MakeText(*WidgetTree, LOCTEXT("Hint", "WASD / 方向键  移动      Z  撤销（按住快退）      R  重开      Esc  暂停"), 15, false, SokobanStyle::Text);
+	UTextBlock* Hint = SokobanStyle::MakeText(*WidgetTree, LOCTEXT("Hint", "WASD / 方向键  移动      Z  撤销（按住快退）      R  重开      滚轮  缩放      Esc  暂停"), 15, false, SokobanStyle::Text);
 	UCanvasPanelSlot* HintSlot = Root->AddChildToCanvas(Hint);
 	HintSlot->SetAnchors(FAnchors(0.5f, 1.f));
 	HintSlot->SetAlignment(FVector2D(0.5f, 1.f));

@@ -50,7 +50,7 @@ public:
 	/** Rebuilds terrain, scenery and pieces for a freshly loaded level. */
 	void BuildLevel(const FSokobanLevel& Level);
 
-	/** Animates a move the puzzle has just applied. Returns the animation length in seconds. */
+	/** Animates a move the puzzle has just applied. Returns the seconds from now until it lands. */
 	float PlayMove(const FSokobanMoveResult& Move, const FSokobanBoardState& NewState);
 
 	/** Glides every piece to State (undo, restart); instant when Duration is 0. */
@@ -80,14 +80,36 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Preview")
 	int32 PreviewLevelIndex = 0;
 
+	/** Name of the previewed level, for reference. */
+	UPROPERTY(VisibleAnywhere, Transient, Category = "Sokoban|Preview")
+	FString PreviewLevelName;
+
+	/** Shows the next level of the pack in the editor viewport. */
+	UFUNCTION(CallInEditor, Category = "Sokoban|Preview")
+	void PreviewNextLevel();
+
+	/** Shows the previous level of the pack in the editor viewport. */
+	UFUNCTION(CallInEditor, Category = "Sokoban|Preview")
+	void PreviewPreviousLevel();
+
+	/** Seconds to walk one cell, one heavy step. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Timing")
-	float WalkDuration = 0.14f;
+	float WalkDuration = 0.25f;
+
+	/** Seconds to push the row one cell once it is sliding: slower than walking, against the weight. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Timing")
+	float PushDuration = 0.34f;
+
+	/** Extra seconds a push from a standstill strains before the row gives. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Timing")
+	float PushStrain = 0.1f;
 
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Timing")
-	float PushDuration = 0.2f;
+	float BumpDuration = 0.18f;
 
+	/** A move issued within this many seconds of the previous one landing carries straight on from it. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Timing")
-	float BumpDuration = 0.16f;
+	float FollowOnWindow = 0.1f;
 
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Pieces")
 	TSubclassOf<ASokobanHero> HeroClass;
@@ -216,7 +238,11 @@ public:
 	TArray<FSokobanDressing> IsletTrees;
 
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Dressing")
-	int32 IsletCount = 9;
+	int32 IsletCount = 12;
+
+	/** How far past the edge of the board the islets sit (min, max). */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Dressing")
+	FVector2D IsletDistance = FVector2D(60.f, 420.f);
 
 protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
@@ -256,6 +282,9 @@ private:
 	/** Draws PreviewLevelIndex with stand-ins for the pieces, which only exist in play. */
 	void BuildEditorPreview();
 	void ClearEditorPreview();
+
+	/** Moves the preview Step levels along the pack (wrapping) and redraws it. */
+	void StepPreview(int32 Step);
 
 	void ClearPieces();
 
@@ -322,6 +351,9 @@ private:
 
 	/** The goal under each instance of GoalMarkers, in instance order. */
 	TArray<FIntPoint> GoalCells;
+
+	/** Direction of the push the hero made last, while its pushes follow one another; unset otherwise. */
+	TOptional<ESokobanDirection> PushingDirection;
 
 	/** World position of the centre of cell (0, 0), the north-west corner. */
 	FVector Origin = FVector::ZeroVector;

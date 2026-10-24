@@ -187,6 +187,7 @@ void ASokobanBoardView::BeginPlay()
 void ASokobanBoardView::BuildLevel(const FSokobanLevel& Level)
 {
 	ClearPieces();
+	PushingDirection.Reset();
 	BuildTerrain(Level);
 
 	FActorSpawnParameters SpawnParams;
@@ -520,8 +521,8 @@ void ASokobanBoardView::BuildDressing(const FSokobanLevel& Level)
 		{
 			continue;
 		}
-		const float Angle = FMath::DegreesToRadians(-125.f + 250.f * (Index + Random.FRandRange(0.15f, 0.85f)) / IsletCount);
-		const float Distance = Radius + Random.FRandRange(150.f, 700.f);
+		const float Angle = FMath::DegreesToRadians(-135.f + 270.f * (Index + Random.FRandRange(0.15f, 0.85f)) / IsletCount);
+		const float Distance = Radius + Random.FRandRange(IsletDistance.X, IsletDistance.Y);
 		const FVector Center = Bounds.GetCenter() + FVector(FMath::Cos(Angle), FMath::Sin(Angle), 0.f) * Distance;
 
 		// Sink the rock so its top third shows above the water, then stand a tree on it.
@@ -587,9 +588,37 @@ UInstancedStaticMeshComponent* ASokobanBoardView::DressingLayer(UStaticMesh* Mes
 	return Layer;
 }
 
+void ASokobanBoardView::PreviewNextLevel()
+{
+	StepPreview(1);
+}
+
+void ASokobanBoardView::PreviewPreviousLevel()
+{
+	StepPreview(-1);
+}
+
+void ASokobanBoardView::StepPreview(int32 Step)
+{
+	TArray<FSokobanLevel> Levels;
+	FString Error;
+	if (!SokobanLevelFiles::LoadPackLevels(SokobanLevelFiles::GetLevelsDir() / PreviewPackFile, Levels, Error) || Levels.Num() == 0)
+	{
+		UE_LOG(LogSokoban, Warning, TEXT("Board preview: cannot read %s. %s"), *PreviewPackFile, *Error);
+		return;
+	}
+
+	Modify();
+	PreviewLevelIndex = (FMath::Max(PreviewLevelIndex, 0) + Step % Levels.Num() + Levels.Num()) % Levels.Num();
+#if WITH_EDITOR
+	RerunConstructionScripts();
+#endif
+}
+
 void ASokobanBoardView::BuildEditorPreview()
 {
 	ClearEditorPreview();
+	PreviewLevelName.Reset();
 	if (PreviewLevelIndex < 0)
 	{
 		ClearTerrain();
@@ -606,6 +635,7 @@ void ASokobanBoardView::BuildEditorPreview()
 	}
 
 	const FSokobanLevel& Level = Levels[PreviewLevelIndex];
+	PreviewLevelName = FString::Printf(TEXT("%d/%d %s"), PreviewLevelIndex + 1, Levels.Num(), *Level.Name);
 	BuildTerrain(Level);
 	PressGoalPlates(Level.InitialState);
 
@@ -658,39 +688,61 @@ void ASokobanBoardView::ClearEditorPreview()
 
 float ASokobanBoardView::PlayMove(const FSokobanMoveResult& Move, const FSokobanBoardState& NewState)
 {
-	FinishAnimations();
-
 	ASokobanHero* Hero = Heroes.IsValidIndex(Move.HeroIndex) ? Heroes[Move.HeroIndex].Get() : nullptr;
 	if (!Hero)
 	{
+		FinishAnimations();
 		return 0.f;
 	}
+
+	// A move issued as the previous one lands starts exactly where that one ends, so a run of moves is one
+	// unbroken motion rather than a string of stops and starts.
+	const double Now = GetWorld()->GetTimeSeconds();
+	const double PreviousEnd = Hero->GetGlideEndTime();
+	const bool bFollowsOn = FMath::Abs(Now - PreviousEnd) <= FollowOnWindow;
+	FinishAnimations();
 
 	Hero->SetFacing(Move.Direction, false);
 	const FVector Forward = SokobanGrid::ToWorld(Move.Direction);
 
+	FSokobanGlide Glide;
+	Glide.StartTime = bFollowsOn ? PreviousEnd : Now;
+
 	switch (Move.Outcome)
 	{
 	case ESokobanMoveOutcome::Walked:
-		Hero->MoveTo(CellToWorld(Move.To), WalkDuration);
-		Hero->PlayAction(ESokobanHeroAction::Walk);
-		return WalkDuration;
+		PushingDirection.Reset();
+		Glide.Style = ESokobanGlideStyle::Steady;
+		Glide.Duration = WalkDuration;
+		Hero->MoveTo(CellToWorld(Move.To), Glide);
+		Hero->PlayAction(ESokobanHeroAction::Walk, WalkDuration);
+		break;
 
 	case ESokobanMoveOutcome::Pushed:
-		Hero->MoveTo(CellToWorld(Move.To), PushDuration);
-		Hero->PlayAction(ESokobanHeroAction::Push);
+	{
+		// Hero and row share one glide, so the paws stay on the crate. Pushing straight on keeps the row
+		// sliding; a push from a standstill strains first.
+		const bool bKeepsSliding = bFollowsOn && PushingDirection.IsSet() && PushingDirection.GetValue() == Move.Direction;
+		Glide.Style = bKeepsSliding ? ESokobanGlideStyle::ShoveOn : ESokobanGlideStyle::Shove;
+		Glide.Hold = bKeepsSliding ? 0.f : PushStrain;
+		Glide.Duration = PushDuration + Glide.Hold;
+		Hero->MoveTo(CellToWorld(Move.To), Glide);
+		Hero->PlayAction(ESokobanHeroAction::Push, Glide.Duration);
 		for (int32 CrateId : Move.Row)
 		{
 			if (Crates.IsValidIndex(CrateId))
 			{
-				Crates[CrateId]->MoveTo(CellToWorld(NewState.Crates[CrateId]), PushDuration);
+				Crates[CrateId]->MoveTo(CellToWorld(NewState.Crates[CrateId]), Glide);
 			}
 		}
 		UpdateCrateHighlights(NewState, false);
-		return PushDuration;
+		PushingDirection = Move.Direction;
+		break;
+	}
 
 	default:
 		// Refused: the hero leans into the obstacle and the stuck row shudders.
+		PushingDirection.Reset();
 		Hero->Bump(Forward, 18.f, BumpDuration);
 		for (int32 CrateId : Move.Row)
 		{
@@ -701,11 +753,14 @@ float ASokobanBoardView::PlayMove(const FSokobanMoveResult& Move, const FSokoban
 		}
 		return BumpDuration;
 	}
+
+	return static_cast<float>(Glide.StartTime + Glide.Duration - Now);
 }
 
 void ASokobanBoardView::SyncToState(const FSokobanBoardState& State, float Duration)
 {
 	FinishAnimations();
+	PushingDirection.Reset();
 	const bool bInstant = Duration <= 0.f;
 
 	for (int32 Index = 0; Index < Heroes.Num() && Index < State.Heroes.Num(); ++Index)

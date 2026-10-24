@@ -2,11 +2,7 @@
 
 ## 角色与动画
 
-| 资源 | 作者 | 授权 | 在项目中的位置 |
-|---|---|---|---|
-| Cat Pilot (Rigged + Animated)（OpenGameArt） | Tomcat94 | CC0 1.0 | `Content/Sokoban/Characters/FatCat` |
-
-改动：用 Blender 脚本把身体改胖，新增 Idle、Push 两个动作；Walk 和 Cheer 来自原文件。
+主角"大力士胖橘"（`Content/Sokoban/Characters/GingerCat`）是本项目自制的：模型、骨骼、调色板贴图和 Idle / Walk / Push / Cheer 四个动作都由 Blender 脚本生成，没有使用第三方角色资源。
 
 ## 场景
 
@@ -19,6 +15,7 @@ CC0 不要求署名，这里仍然列出以示感谢。
 
 ## 项目自制
 
+- 主角：见上文"角色与动画"。
 - 材质：`Content/Sokoban/Materials` 下的 M_SokobanCharacter、M_SokobanProp、M_SokobanFoliage、M_SokobanTerrain、M_SokobanWater、M_SokobanGoalPlate、M_SokobanToon（卡通后期）、M_SokobanCloudShadows（云影灯光函数）。
 - 水面波纹法线贴图 T_WaterRipples_N：由脚本按正弦波叠加生成。
 
