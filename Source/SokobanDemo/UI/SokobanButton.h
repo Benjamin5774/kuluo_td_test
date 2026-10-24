@@ -19,6 +19,9 @@ public:
 	/** Shows the highlighted look while the button holds keyboard or gamepad focus. Call every frame. */
 	void UpdateFocusLook();
 
+	/** Before the button is first shown: whether it can take keyboard / gamepad focus (it can by default). */
+	void InitFocusable(bool bInFocusable) { InitIsFocusable(bInFocusable); }
+
 protected:
 	virtual void SynchronizeProperties() override;
 

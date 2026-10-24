@@ -79,6 +79,18 @@ public:
 	/** Bounds the playable surface of a level Size cells across (columns, rows) would have; levels are centred on the board. */
 	FBox GetBoundsForSize(const FIntPoint& Size) const;
 
+	/** The cell under a world position on the board (possibly outside the level). */
+	FIntPoint WorldToCell(const FVector& World) const;
+
+	/**
+	 * Level editor: faint plates over the board's empty cells, so they can be painted on. Takes effect from the
+	 * next BuildLevel; turning it off clears them at once.
+	 */
+	void SetCanvasOverlay(bool bEnabled);
+
+	/** Level editor: highlights Cell (red when bErase), or nothing when unset or outside the level. */
+	void SetCanvasCursor(const TOptional<FIntPoint>& Cell, bool bErase);
+
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Layout")
 	float CellSize = 100.f;
 
@@ -233,6 +245,16 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Dressing")
 	float ShoreRockChance = 0.3f;
 
+	/** Level editor overlay: plates over empty cells, the hovered cell, and the hovered cell while erasing. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Editor")
+	TObjectPtr<UMaterialInterface> CanvasGridMaterial;
+
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Editor")
+	TObjectPtr<UMaterialInterface> CanvasCursorMaterial;
+
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Editor")
+	TObjectPtr<UMaterialInterface> CanvasEraseMaterial;
+
 protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
@@ -252,6 +274,15 @@ private:
 
 	/** Outer walls between the courtyard and the camera (which looks north from the south), kept low. */
 	bool IsFrontWall(const FIntPoint& Cell) const;
+
+	/** Lays the editor's plates over the empty cells, when the overlay is on. */
+	void BuildCanvasOverlay();
+
+public:
+	/** How high the top of Cell is above the floor: its wall's height, or 0 for anything else. */
+	float WallTop(const FIntPoint& Cell) const;
+
+private:
 
 	bool IsVoid(const FIntPoint& Cell) const { return Layout.GetTile(Cell) == ESokobanTile::Void; }
 
@@ -316,6 +347,15 @@ private:
 	/** Underwater rock and sand around the island. */
 	UPROPERTY(VisibleAnywhere, Category = "Sokoban")
 	TObjectPtr<UInstancedStaticMeshComponent> ShelfTiles;
+
+	/** Level editor overlay (see SetCanvasOverlay and SetCanvasCursor). */
+	UPROPERTY(VisibleAnywhere, Category = "Sokoban|Editor")
+	TObjectPtr<UInstancedStaticMeshComponent> CanvasCells;
+
+	UPROPERTY(VisibleAnywhere, Category = "Sokoban|Editor")
+	TObjectPtr<UStaticMeshComponent> CanvasCursor;
+
+	bool bCanvasOverlay = false;
 
 	/** Editor-only stand-ins for the pieces in the preview. */
 	UPROPERTY(VisibleAnywhere, Category = "Sokoban|Preview")

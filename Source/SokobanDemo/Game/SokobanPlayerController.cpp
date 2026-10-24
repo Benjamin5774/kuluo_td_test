@@ -4,10 +4,15 @@
 #include "SokobanDemo.h"
 #include "Game/SokobanGameMode.h"
 #include "Game/SokobanProgressSubsystem.h"
+#include "LevelEditor/SokobanLevelEditor.h"
+#include "LevelEditor/SokobanLevelShelf.h"
+#include "Puzzle/SokobanEditCanvas.h"
 #include "Puzzle/SokobanSolver.h"
+#include "UI/SokobanEditorWidget.h"
 #include "UI/SokobanHUDWidget.h"
 #include "UI/SokobanLevelSelectWidget.h"
 #include "UI/SokobanMenuPanel.h"
+#include "UI/SokobanShelfWidget.h"
 #include "View/SokobanBoardView.h"
 #include "View/SokobanCameraRig.h"
 #include "Blueprint/UserWidget.h"
@@ -25,6 +30,58 @@
 
 #define LOCTEXT_NAMESPACE "SokobanPlayerController"
 
+namespace
+{
+	/** Where leaving a test play returns to. */
+	FText DescribeTestReturn(ESokobanPlayContext Context)
+	{
+		return Context == ESokobanPlayContext::EditorTest ? LOCTEXT("BackToEditor", "返回编辑器") : LOCTEXT("BackToSaved", "返回保存的关卡");
+	}
+
+	/** A draft's state in a few words, for the drafts list. */
+	FText DescribeDraft(const FSokobanEditCanvas& Canvas)
+	{
+		const TArray<ESokobanCanvasIssue> Issues = Canvas.FindIssues();
+		if (Issues.Num() == 0)
+		{
+			return LOCTEXT("DraftReady", "可以试玩");
+		}
+		switch (Issues[0])
+		{
+		case ESokobanCanvasIssue::NoHero:
+			return LOCTEXT("DraftNoHero", "还没放大橘");
+		case ESokobanCanvasIssue::NoGoal:
+			return LOCTEXT("DraftNoGoal", "还没有目标点");
+		case ESokobanCanvasIssue::TooFewCrates:
+			return LOCTEXT("DraftFewCrates", "箱子不够");
+		default:
+			return LOCTEXT("DraftOpen", "墙没围好");
+		}
+	}
+
+	/** Dev commands: a brush by name (floor, wall, crate, goal, hero or erase). */
+	bool ParseBrush(const FString& Name, ESokobanBrush& OutBrush)
+	{
+		static const TMap<FString, ESokobanBrush> Names = {
+			{ TEXT("floor"), ESokobanBrush::Floor }, { TEXT("wall"), ESokobanBrush::Wall }, { TEXT("crate"), ESokobanBrush::Crate },
+			{ TEXT("goal"), ESokobanBrush::Goal }, { TEXT("hero"), ESokobanBrush::Hero }, { TEXT("erase"), ESokobanBrush::Erase } };
+		if (const ESokobanBrush* Found = Names.Find(Name.ToLower()))
+		{
+			OutBrush = *Found;
+			return true;
+		}
+		UE_LOG(LogSokoban, Warning, TEXT("Unknown brush '%s' (floor, wall, crate, goal, hero or erase)."), *Name);
+		return false;
+	}
+
+	/** When a shelf file last changed, in local time. */
+	FText DescribeModified(const FDateTime& Utc)
+	{
+		const FDateTime Local = Utc + (FDateTime::Now() - FDateTime::UtcNow());
+		return FText::FromString(FString::Printf(TEXT("%d月%d日 %02d:%02d"), Local.GetMonth(), Local.GetDay(), Local.GetHour(), Local.GetMinute()));
+	}
+}
+
 ASokobanPlayerController::ASokobanPlayerController()
 {
 	// The camera rig is the view target for the whole session; never swap it for a pawn.
@@ -34,6 +91,8 @@ ASokobanPlayerController::ASokobanPlayerController()
 	HUDClass = USokobanHUDWidget::StaticClass();
 	MenuPanelClass = USokobanMenuPanel::StaticClass();
 	LevelSelectClass = USokobanLevelSelectWidget::StaticClass();
+	EditorScreenClass = USokobanEditorWidget::StaticClass();
+	ShelfScreenClass = USokobanShelfWidget::StaticClass();
 }
 
 void ASokobanPlayerController::BeginPlay()
@@ -59,14 +118,25 @@ void ASokobanPlayerController::BeginPlay()
 		}
 		GameMode->OnFlowStateChanged.AddUObject(this, &ASokobanPlayerController::HandleFlowStateChanged);
 		GameMode->OnPuzzleChanged.AddUObject(this, &ASokobanPlayerController::HandlePuzzleChanged);
+		if (EditorScreen)
+		{
+			EditorScreen->Bind(GameMode->GetLevelEditor());
+		}
 	}
 }
 
 void ASokobanPlayerController::CreateWidgets()
 {
 	HUD = CreateWidget<USokobanHUDWidget>(this, HUDClass);
+	HUD->OnPause = [this]() { OnPausePressed(); };
 	HUD->AddToViewport(0);
 	HUD->SetVisibility(ESlateVisibility::Collapsed);
+
+	EditorScreen = CreateWidget<USokobanEditorWidget>(this, EditorScreenClass);
+	EditorScreen->OnTestPlay = [this]() { if (ASokobanGameMode* GameMode = GetSokobanGameMode()) { GameMode->TestPlayDrawing(); } };
+	EditorScreen->OnBack = [this]() { if (ASokobanGameMode* GameMode = GetSokobanGameMode()) { GameMode->ShowEditorHome(); } };
+	EditorScreen->AddToViewport(5);
+	EditorScreen->SetVisibility(ESlateVisibility::Collapsed);
 
 	MenuPanel = CreateWidget<USokobanMenuPanel>(this, MenuPanelClass);
 	MenuPanel->AddToViewport(10);
@@ -75,6 +145,10 @@ void ASokobanPlayerController::CreateWidgets()
 	LevelSelect = CreateWidget<USokobanLevelSelectWidget>(this, LevelSelectClass);
 	LevelSelect->AddToViewport(10);
 	LevelSelect->SetVisibility(ESlateVisibility::Collapsed);
+
+	ShelfScreen = CreateWidget<USokobanShelfWidget>(this, ShelfScreenClass);
+	ShelfScreen->AddToViewport(10);
+	ShelfScreen->SetVisibility(ESlateVisibility::Collapsed);
 }
 
 void ASokobanPlayerController::CreateInputMappings()
@@ -104,6 +178,18 @@ void ASokobanPlayerController::CreateInputMappings()
 	RestartAction = MakeAction(TEXT("IA_Restart"), { EKeys::R, EKeys::Gamepad_FaceButton_Top });
 	PauseAction = MakeAction(TEXT("IA_Pause"), { EKeys::Escape, EKeys::P, EKeys::Gamepad_Special_Right });
 
+	// The level editor: the mouse paints and erases, the number keys pick a brush, and Z (above) undoes.
+	PaintAction = MakeAction(TEXT("IA_Paint"), { EKeys::LeftMouseButton });
+	EraseAction = MakeAction(TEXT("IA_Erase"), { EKeys::RightMouseButton });
+	RedoAction = MakeAction(TEXT("IA_Redo"), { EKeys::Y });
+	const FKey BrushKeys[][2] = {
+		{ EKeys::One, EKeys::NumPadOne }, { EKeys::Two, EKeys::NumPadTwo }, { EKeys::Three, EKeys::NumPadThree },
+		{ EKeys::Four, EKeys::NumPadFour }, { EKeys::Five, EKeys::NumPadFive }, { EKeys::Six, EKeys::NumPadSix } };
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(BrushKeys); ++Index)
+	{
+		BrushActions.Add(MakeAction(*FString::Printf(TEXT("IA_Brush%d"), Index + 1), { BrushKeys[Index][0], BrushKeys[Index][1] }));
+	}
+
 	// The wheel reports one unit per notch, positive when rolled away (zoom in).
 	ZoomAction = NewObject<UInputAction>(this, TEXT("IA_Zoom"));
 	ZoomAction->ValueType = EInputActionValueType::Axis1D;
@@ -132,6 +218,15 @@ void ASokobanPlayerController::SetupInputComponent()
 	Input->BindAction(RestartAction, ETriggerEvent::Started, this, &ASokobanPlayerController::OnRestartPressed);
 	Input->BindAction(PauseAction, ETriggerEvent::Started, this, &ASokobanPlayerController::OnPausePressed);
 	Input->BindAction(ZoomAction, ETriggerEvent::Triggered, this, &ASokobanPlayerController::OnZoom);
+	Input->BindAction(PaintAction, ETriggerEvent::Started, this, &ASokobanPlayerController::OnStrokePressed, false);
+	Input->BindAction(PaintAction, ETriggerEvent::Completed, this, &ASokobanPlayerController::OnStrokeReleased, false);
+	Input->BindAction(EraseAction, ETriggerEvent::Started, this, &ASokobanPlayerController::OnStrokePressed, true);
+	Input->BindAction(EraseAction, ETriggerEvent::Completed, this, &ASokobanPlayerController::OnStrokeReleased, true);
+	Input->BindAction(RedoAction, ETriggerEvent::Started, this, &ASokobanPlayerController::OnRedoPressed);
+	for (int32 Index = 0; Index < BrushActions.Num(); ++Index)
+	{
+		Input->BindAction(BrushActions[Index], ETriggerEvent::Started, this, &ASokobanPlayerController::OnBrushPressed, Index);
+	}
 }
 
 void ASokobanPlayerController::PlayerTick(float DeltaTime)
@@ -232,6 +327,15 @@ void ASokobanPlayerController::OnDirectionReleased(ESokobanDirection Direction)
 
 void ASokobanPlayerController::OnUndoPressed()
 {
+	if (ASokobanLevelEditor* Editor = GetDrawingEditor())
+	{
+		if (!bStroking)
+		{
+			Editor->Undo();
+		}
+		return;
+	}
+
 	ASokobanGameMode* GameMode = GetSokobanGameMode();
 	if (!GameMode || !IsPlaying())
 	{
@@ -271,19 +375,79 @@ void ASokobanPlayerController::OnRestartPressed()
 
 void ASokobanPlayerController::OnPausePressed()
 {
-	if (ASokobanGameMode* GameMode = GetSokobanGameMode())
+	ASokobanGameMode* GameMode = GetSokobanGameMode();
+	if (!GameMode)
+	{
+		return;
+	}
+
+	if (GameMode->GetFlowState() != ESokobanFlowState::Editing)
 	{
 		GameMode->PauseGame();
+	}
+	else if (GetDrawingEditor())
+	{
+		// Like the editor's back button.
+		GameMode->ShowEditorHome();
 	}
 }
 
 void ASokobanPlayerController::OnZoom(const FInputActionValue& Value)
 {
 	ASokobanGameMode* GameMode = GetSokobanGameMode();
-	if (GameMode && GameMode->GetCameraRig() && IsPlaying())
+	if (GameMode && GameMode->GetCameraRig() && (IsPlaying() || GetDrawingEditor()))
 	{
 		GameMode->GetCameraRig()->AddZoom(Value.Get<float>());
 	}
+}
+
+void ASokobanPlayerController::OnStrokePressed(bool bErase)
+{
+	// One stroke at a time: the other button does nothing until it ends.
+	ASokobanLevelEditor* Editor = GetDrawingEditor();
+	if (Editor && !bStroking)
+	{
+		bStroking = true;
+		bStrokeErases = bErase;
+		Editor->BeginStroke(bErase);
+	}
+}
+
+void ASokobanPlayerController::OnStrokeReleased(bool bErase)
+{
+	ASokobanGameMode* GameMode = GetSokobanGameMode();
+	if (bStroking && bStrokeErases == bErase && GameMode)
+	{
+		bStroking = false;
+		GameMode->GetLevelEditor()->EndStroke();
+	}
+}
+
+void ASokobanPlayerController::OnRedoPressed()
+{
+	ASokobanLevelEditor* Editor = GetDrawingEditor();
+	if (Editor && !bStroking)
+	{
+		Editor->Redo();
+	}
+}
+
+void ASokobanPlayerController::OnBrushPressed(int32 Brush)
+{
+	if (ASokobanLevelEditor* Editor = GetDrawingEditor())
+	{
+		Editor->SetBrush(static_cast<ESokobanBrush>(Brush));
+	}
+}
+
+ASokobanLevelEditor* ASokobanPlayerController::GetDrawingEditor() const
+{
+	const ASokobanGameMode* GameMode = GetSokobanGameMode();
+	if (!GameMode || GameMode->GetFlowState() != ESokobanFlowState::Editing || (EditorScreen && EditorScreen->IsEditingName()))
+	{
+		return nullptr;
+	}
+	return GameMode->GetLevelEditor();
 }
 
 FSokobanMoveResult ASokobanPlayerController::IssueMove(ESokobanDirection Direction)
@@ -332,6 +496,7 @@ void ASokobanPlayerController::HandleFlowStateChanged(ESokobanFlowState State)
 	BoardBusyUntil = 0.0;
 	CarriedStepTime = -1.0;
 	bUndoHeld = false;
+	bStroking = false;
 	if (State != ESokobanFlowState::Playing)
 	{
 		AutoMoves.Reset();
@@ -342,10 +507,13 @@ void ASokobanPlayerController::HandleFlowStateChanged(ESokobanFlowState State)
 		return;
 	}
 
+	// Of the HUD and the editor screen only the buttons take clicks; the rest of the screen is the board's.
 	const bool bInLevel = State == ESokobanFlowState::Playing || State == ESokobanFlowState::Paused || State == ESokobanFlowState::LevelComplete;
-	HUD->SetVisibility(bInLevel ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	HUD->SetVisibility(bInLevel ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+	EditorScreen->SetVisibility(State == ESokobanFlowState::Editing ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
 	MenuPanel->SetVisibility(ESlateVisibility::Collapsed);
 	LevelSelect->SetVisibility(ESlateVisibility::Collapsed);
+	ShelfScreen->SetVisibility(ESlateVisibility::Collapsed);
 
 	switch (State)
 	{
@@ -361,6 +529,15 @@ void ASokobanPlayerController::HandleFlowStateChanged(ESokobanFlowState State)
 	case ESokobanFlowState::LevelComplete:
 		PresentResults();
 		break;
+	case ESokobanFlowState::EditorHome:
+		PresentEditorHome();
+		break;
+	case ESokobanFlowState::EditorShelf:
+		PresentShelf();
+		break;
+	case ESokobanFlowState::Editing:
+		PresentDrawing();
+		break;
 	default:
 		FocusGame();
 		break;
@@ -370,13 +547,16 @@ void ASokobanPlayerController::HandleFlowStateChanged(ESokobanFlowState State)
 void ASokobanPlayerController::HandlePuzzleChanged()
 {
 	const ASokobanGameMode* GameMode = GetSokobanGameMode();
-	if (!HUD || !GameMode || GameMode->GetLevelIndex() == INDEX_NONE)
+	if (!HUD || !GameMode)
 	{
 		return;
 	}
 
 	const FSokobanLevel& Level = GameMode->GetPuzzle().GetLevel();
-	HUD->SetLevelTitle(FText::Format(LOCTEXT("LevelTitle", "第 {0} 关 · {1}"), GameMode->GetLevelIndex() + 1, FText::FromString(Level.Name)));
+	const bool bCampaign = GameMode->GetPlayContext() == ESokobanPlayContext::Campaign;
+	HUD->SetLevelTitle(bCampaign
+		? FText::Format(LOCTEXT("LevelTitle", "第 {0} 关 · {1}"), GameMode->GetLevelIndex() + 1, FText::FromString(Level.Name))
+		: FText::Format(LOCTEXT("TestTitle", "试玩 · {0}"), FText::FromString(Level.Name)));
 
 	TArray<FText> Stats;
 	Stats.Add(FText::Format(LOCTEXT("Moves", "步数 {0}"), GameMode->GetPuzzle().GetState().MoveCount));
@@ -384,7 +564,7 @@ void ASokobanPlayerController::HandlePuzzleChanged()
 	{
 		Stats.Add(FText::Format(LOCTEXT("Par", "满星 {0}"), Level.Par));
 	}
-	if (const int32 Best = GameMode->GetBestMoves(GameMode->GetLevelIndex()))
+	if (const int32 Best = bCampaign ? GameMode->GetBestMoves(GameMode->GetLevelIndex()) : 0)
 	{
 		Stats.Add(FText::Format(LOCTEXT("Best", "最佳 {0}"), Best));
 	}
@@ -395,16 +575,40 @@ void ASokobanPlayerController::PresentMainMenu()
 {
 	TWeakObjectPtr<ASokobanGameMode> GameMode = GetSokobanGameMode();
 	TWeakObjectPtr<ASokobanPlayerController> WeakThis = this;
-	const bool bHasProgress = GameMode.IsValid() && GameMode->HasAnyProgress();
+	if (!GameMode.IsValid())
+	{
+		return;
+	}
+
+	// Starting over wipes progress, which deserves a second thought.
+	const bool bHasProgress = GameMode->HasAnyProgress();
+	auto StartNewGame = [GameMode, WeakThis, bHasProgress]()
+	{
+		if (!GameMode.IsValid() || !WeakThis.IsValid())
+		{
+			return;
+		}
+		if (!bHasProgress)
+		{
+			GameMode->StartNewGame();
+			return;
+		}
+		WeakThis->PresentConfirm(LOCTEXT("NewGameTitle", "开始新游戏？"),
+			LOCTEXT("NewGameMessage", "通关记录和最佳步数会被清除，\n从第 1 关重新开始。\n自制的关卡不受影响。"),
+			LOCTEXT("NewGameConfirm", "清除进度，重新开始"),
+			[GameMode]() { if (GameMode.IsValid()) { GameMode->StartNewGame(); } },
+			[WeakThis]() { if (WeakThis.IsValid()) { WeakThis->PresentMainMenu(); } });
+	};
 
 	TArray<FSokobanMenuItem> Items;
-	Items.Add({ bHasProgress ? LOCTEXT("Continue", "继续游戏") : LOCTEXT("Start", "开始游戏"), [GameMode]() { if (GameMode.IsValid()) { GameMode->ContinueGame(); } } });
+	Items.Add({ LOCTEXT("Continue", "继续"), [GameMode]() { if (GameMode.IsValid()) { GameMode->ContinueGame(); } }, GameMode->CanContinueGame() });
+	Items.Add({ LOCTEXT("NewGame", "开始新游戏"), StartNewGame });
 	Items.Add({ LOCTEXT("SelectLevel", "选择关卡"), [GameMode]() { if (GameMode.IsValid()) { GameMode->ShowLevelSelect(); } } });
-	Items.Add({ LOCTEXT("Editor", "关卡编辑器（制作中）"), nullptr, false });
+	Items.Add({ LOCTEXT("Editor", "关卡编辑器"), [GameMode]() { if (GameMode.IsValid()) { GameMode->ShowEditorHome(); } } });
 	Items.Add({ LOCTEXT("Quit", "退出游戏"), [WeakThis]() { if (WeakThis.IsValid()) { UKismetSystemLibrary::QuitGame(WeakThis.Get(), WeakThis.Get(), EQuitPreference::Quit, false); } } });
 
 	MenuPanel->SetVisibility(ESlateVisibility::Visible);
-	FocusUI(MenuPanel);
+	FocusUI();
 	MenuPanel->Present(LOCTEXT("GameTitle", "浮岛搬运行会"), LOCTEXT("Tagline", "大力士一次能推动面前的一整排箱子。\n把每个箱子送上发光的目标点。"), MoveTemp(Items), nullptr);
 }
 
@@ -442,7 +646,7 @@ void ASokobanPlayerController::PresentLevelSelect()
 	}
 
 	LevelSelect->SetVisibility(ESlateVisibility::Visible);
-	FocusUI(LevelSelect);
+	FocusUI();
 	LevelSelect->Present(FText::FromString(GameMode->GetPackName()), Cards, GameMode->GetContinueIndex(),
 		[GameMode](int32 Index) { if (GameMode.IsValid()) { GameMode->StartLevel(Index); } },
 		[GameMode]() { if (GameMode.IsValid()) { GameMode->ShowMainMenu(); } });
@@ -457,17 +661,29 @@ void ASokobanPlayerController::PresentPauseMenu()
 	}
 
 	auto Resume = [GameMode]() { if (GameMode.IsValid()) { GameMode->ResumeGame(); } };
+	const FSokobanLevel& Level = GameMode->GetPuzzle().GetLevel();
+	const ESokobanPlayContext Context = GameMode->GetPlayContext();
 
 	TArray<FSokobanMenuItem> Items;
 	Items.Add({ LOCTEXT("Resume", "继续"), Resume });
 	Items.Add({ LOCTEXT("Restart", "重新开始"), [GameMode]() { if (GameMode.IsValid()) { GameMode->ResumeGame(); GameMode->RequestRestart(); } } });
-	Items.Add({ LOCTEXT("PauseLevels", "选择关卡"), [GameMode]() { if (GameMode.IsValid()) { GameMode->ShowLevelSelect(); } } });
+	FText Where;
+	if (Context == ESokobanPlayContext::Campaign)
+	{
+		Items.Add({ LOCTEXT("PauseLevels", "选择关卡"), [GameMode]() { if (GameMode.IsValid()) { GameMode->ShowLevelSelect(); } } });
+		Items.Add({ LOCTEXT("PauseEditor", "关卡编辑器"), [GameMode]() { if (GameMode.IsValid()) { GameMode->ShowEditorHome(); } } });
+		Where = FText::Format(LOCTEXT("PausedLevel", "第 {0} 关 · {1}"), GameMode->GetLevelIndex() + 1, FText::FromString(Level.Name));
+	}
+	else
+	{
+		Items.Add({ DescribeTestReturn(Context), [GameMode]() { if (GameMode.IsValid()) { GameMode->LeaveTestPlay(); } } });
+		Where = FText::Format(LOCTEXT("PausedTest", "试玩 · {0}"), FText::FromString(Level.Name));
+	}
 	Items.Add({ LOCTEXT("MainMenu", "返回主菜单"), [GameMode]() { if (GameMode.IsValid()) { GameMode->ShowMainMenu(); } } });
 
-	const FSokobanLevel& Level = GameMode->GetPuzzle().GetLevel();
 	MenuPanel->SetVisibility(ESlateVisibility::Visible);
-	FocusUI(MenuPanel);
-	MenuPanel->Present(LOCTEXT("Paused", "暂停"), FText::Format(LOCTEXT("PausedLevel", "第 {0} 关 · {1}"), GameMode->GetLevelIndex() + 1, FText::FromString(Level.Name)), MoveTemp(Items), Resume);
+	FocusUI();
+	MenuPanel->Present(LOCTEXT("Paused", "暂停"), Where, MoveTemp(Items), Resume);
 }
 
 void ASokobanPlayerController::PresentResults()
@@ -479,6 +695,7 @@ void ASokobanPlayerController::PresentResults()
 	}
 
 	const FSokobanCompletion& Result = GameMode->GetLastCompletion();
+	const ESokobanPlayContext Context = GameMode->GetPlayContext();
 	TArray<FText> Lines;
 	Lines.Add(Result.Par > 0
 		? FText::Format(LOCTEXT("MovesUsedPar", "用了 {0} 步（满星 {1} 步）"), Result.Moves, Result.Par)
@@ -492,34 +709,153 @@ void ASokobanPlayerController::PresentResults()
 	{
 		Lines.Add(LOCTEXT("NewBest", "新纪录！"));
 	}
-
-	auto ToLevels = [GameMode]() { if (GameMode.IsValid()) { GameMode->ShowLevelSelect(); } };
-
-	TArray<FSokobanMenuItem> Items;
-	if (Result.bLastLevel)
+	if (Context == ESokobanPlayContext::EditorTest)
 	{
-		Items.Add({ LOCTEXT("BackToLevels", "回到关卡列表"), ToLevels });
+		Lines.Add(LOCTEXT("TestProven", "通关就证明解得开，回到编辑器就能保存"));
+	}
+
+	const FText ReplayLabel = LOCTEXT("Replay", "再玩一次");
+	TArray<FSokobanMenuItem> Items;
+	TFunction<void()> OnBack;
+	if (Context == ESokobanPlayContext::Campaign)
+	{
+		auto ToLevels = [GameMode]() { if (GameMode.IsValid()) { GameMode->ShowLevelSelect(); } };
+		if (Result.bLastLevel)
+		{
+			Items.Add({ LOCTEXT("BackToLevels", "回到关卡列表"), ToLevels });
+		}
+		else
+		{
+			Items.Add({ LOCTEXT("Next", "下一关"), [GameMode]() { if (GameMode.IsValid()) { GameMode->StartNextLevel(); } } });
+		}
+		Items.Add({ ReplayLabel, [GameMode]() { if (GameMode.IsValid()) { GameMode->StartLevel(GameMode->GetLevelIndex()); } } });
+		if (!Result.bLastLevel)
+		{
+			Items.Add({ LOCTEXT("ResultLevels", "选择关卡"), ToLevels });
+		}
+		OnBack = ToLevels;
 	}
 	else
 	{
-		Items.Add({ LOCTEXT("Next", "下一关"), [GameMode]() { if (GameMode.IsValid()) { GameMode->StartNextLevel(); } } });
-	}
-	Items.Add({ LOCTEXT("Replay", "再玩一次"), [GameMode]() { if (GameMode.IsValid()) { GameMode->StartLevel(GameMode->GetLevelIndex()); } } });
-	if (!Result.bLastLevel)
-	{
-		Items.Add({ LOCTEXT("ResultLevels", "选择关卡"), ToLevels });
+		auto Leave = [GameMode]() { if (GameMode.IsValid()) { GameMode->LeaveTestPlay(); } };
+		Items.Add({ DescribeTestReturn(Context), Leave });
+		Items.Add({ ReplayLabel, [GameMode]() { if (GameMode.IsValid()) { GameMode->ReplayTestLevel(); } } });
+		OnBack = Leave;
 	}
 
 	MenuPanel->SetVisibility(ESlateVisibility::Visible);
-	FocusUI(MenuPanel);
-	MenuPanel->Present(Result.bLastLevel ? LOCTEXT("AllClear", "全部完成！") : LOCTEXT("Clear", "过关！"), FText::Join(FText::FromString(TEXT("\n")), Lines), MoveTemp(Items), ToLevels);
-	MenuPanel->ShowStars(Result.Stars);
+	FocusUI();
+	MenuPanel->Present(Result.bLastLevel ? LOCTEXT("AllClear", "全部完成！") : LOCTEXT("Clear", "过关！"), FText::Join(FText::FromString(TEXT("\n")), Lines), MoveTemp(Items), MoveTemp(OnBack));
+	// A drawing nobody has solved yet has no par to rate against.
+	if (Context == ESokobanPlayContext::Campaign || Result.Par > 0)
+	{
+		MenuPanel->ShowStars(Result.Stars);
+	}
 }
 
-void ASokobanPlayerController::FocusUI(UUserWidget* Widget)
+void ASokobanPlayerController::PresentEditorHome()
 {
+	TWeakObjectPtr<ASokobanGameMode> GameMode = GetSokobanGameMode();
+	if (!GameMode.IsValid())
+	{
+		return;
+	}
+
+	const int32 SavedCount = SokobanShelf::List(SokobanShelf::GetDir(ESokobanShelf::Saved)).Num();
+	const int32 DraftCount = SokobanShelf::List(SokobanShelf::GetDir(ESokobanShelf::Drafts)).Num();
+	auto ToMainMenu = [GameMode]() { if (GameMode.IsValid()) { GameMode->ShowMainMenu(); } };
+
+	TArray<FSokobanMenuItem> Items;
+	Items.Add({ LOCTEXT("DesignNew", "设计新关卡"), [GameMode]() { if (GameMode.IsValid()) { GameMode->DesignNewLevel(); } } });
+	Items.Add({ LOCTEXT("ContinueDesign", "继续设计关卡"), [GameMode]() { if (GameMode.IsValid()) { GameMode->ContinueDesign(); } }, GameMode->CanContinueDesign() });
+	Items.Add({ FText::Format(LOCTEXT("ViewSaved", "查看保存的关卡（{0}）"), SavedCount), [GameMode]() { if (GameMode.IsValid()) { GameMode->ShowShelf(ESokobanShelf::Saved); } } });
+	Items.Add({ FText::Format(LOCTEXT("ViewDrafts", "查看草稿（{0}）"), DraftCount), [GameMode]() { if (GameMode.IsValid()) { GameMode->ShowShelf(ESokobanShelf::Drafts); } } });
+	Items.Add({ LOCTEXT("MainMenu", "返回主菜单"), ToMainMenu });
+
+	MenuPanel->SetVisibility(ESlateVisibility::Visible);
+	FocusUI();
+	MenuPanel->Present(LOCTEXT("EditorHomeTitle", "关卡编辑器"),
+		LOCTEXT("EditorHomeMessage", "摆好墙、箱子、目标点和大橘，\n确认解得开就能保存成关卡。"), MoveTemp(Items), ToMainMenu);
+}
+
+void ASokobanPlayerController::PresentShelf()
+{
+	TWeakObjectPtr<ASokobanGameMode> GameMode = GetSokobanGameMode();
+	TWeakObjectPtr<ASokobanPlayerController> WeakThis = this;
+	if (!GameMode.IsValid())
+	{
+		return;
+	}
+
+	const ESokobanShelf Shelf = GameMode->GetShelf();
+	const bool bSaved = Shelf == ESokobanShelf::Saved;
+	TArray<FSokobanShelfRow> Rows;
+	for (const FSokobanShelfEntry& Entry : SokobanShelf::List(SokobanShelf::GetDir(Shelf)))
+	{
+		const FSokobanLevelData Data = Entry.Data;
+		const FSokobanEditCanvas Canvas = FSokobanEditCanvas::FromRows(Data.Map);
+		const FText Size = FText::Format(LOCTEXT("ShelfSize", "{0} × {1}"), Canvas.GetSize().X, Canvas.GetSize().Y);
+
+		FSokobanShelfRow& Row = Rows.AddDefaulted_GetRef();
+		Row.Name = FText::FromString(Data.Name);
+		if (bSaved)
+		{
+			Row.Info = FText::Format(LOCTEXT("SavedInfo", "{0} · 满星 {1} 步 · {2}"), Size, Data.Par, DescribeModified(Entry.Modified));
+			Row.Actions.Add({ LOCTEXT("ShelfTest", "试玩"), [GameMode, Data]() { if (GameMode.IsValid()) { GameMode->TestPlayShelfLevel(Data); } } });
+			Row.Actions.Add({ LOCTEXT("ShelfEdit", "编辑"), [GameMode, Data]() { if (GameMode.IsValid()) { GameMode->EditShelfLevel(ESokobanShelf::Saved, Data); } } });
+		}
+		else
+		{
+			Row.Info = FText::Format(LOCTEXT("DraftInfo", "{0} · {1} · {2}"), Size, DescribeDraft(Canvas), DescribeModified(Entry.Modified));
+			Row.Actions.Add({ LOCTEXT("ShelfContinue", "继续编辑"), [GameMode, Data]() { if (GameMode.IsValid()) { GameMode->EditShelfLevel(ESokobanShelf::Drafts, Data); } } });
+		}
+		Row.Actions.Add({ LOCTEXT("ShelfDelete", "删除"), [GameMode, WeakThis, Shelf, Data]()
+		{
+			if (!GameMode.IsValid() || !WeakThis.IsValid())
+			{
+				return;
+			}
+			auto BackToList = [WeakThis]() { if (WeakThis.IsValid()) { WeakThis->PresentShelf(); } };
+			WeakThis->PresentConfirm(FText::Format(LOCTEXT("DeleteTitle", "删除「{0}」？"), FText::FromString(Data.Name)),
+				LOCTEXT("DeleteMessage", "删除后就找不回来了。"), LOCTEXT("DeleteConfirm", "删除"),
+				[GameMode, Shelf, Id = Data.Id, BackToList]() { if (GameMode.IsValid()) { GameMode->DeleteShelfLevel(Shelf, Id); } BackToList(); },
+				BackToList);
+		} });
+	}
+
+	MenuPanel->SetVisibility(ESlateVisibility::Collapsed);
+	ShelfScreen->SetVisibility(ESlateVisibility::Visible);
+	FocusUI();
+	ShelfScreen->Present(bSaved ? LOCTEXT("SavedTitle", "保存的关卡") : LOCTEXT("DraftsTitle", "草稿"),
+		bSaved ? LOCTEXT("SavedEmpty", "还没有保存的关卡。\n在编辑器里画好一关，确认解得开就能保存。") : LOCTEXT("DraftsEmpty", "还没有草稿。\n离开编辑器时，没保存的改动会自动存成草稿。"),
+		MoveTemp(Rows), [GameMode]() { if (GameMode.IsValid()) { GameMode->ShowEditorHome(); } });
+}
+
+void ASokobanPlayerController::PresentDrawing()
+{
+	EditorScreen->Refresh();
+	FocusGame();
+}
+
+void ASokobanPlayerController::PresentConfirm(const FText& Title, const FText& Message, const FText& ConfirmLabel, TFunction<void()> OnConfirm, TFunction<void()> OnCancel)
+{
+	// Cancel comes first and takes the focus, so a stray Enter doesn't confirm.
+	TArray<FSokobanMenuItem> Items;
+	Items.Add({ LOCTEXT("Cancel", "取消"), OnCancel });
+	Items.Add({ ConfirmLabel, MoveTemp(OnConfirm) });
+
+	LevelSelect->SetVisibility(ESlateVisibility::Collapsed);
+	ShelfScreen->SetVisibility(ESlateVisibility::Collapsed);
+	MenuPanel->SetVisibility(ESlateVisibility::Visible);
+	FocusUI();
+	MenuPanel->Present(Title, Message, MoveTemp(Items), MoveTemp(OnCancel));
+}
+
+void ASokobanPlayerController::FocusUI()
+{
+	// No widget to focus here: the input mode would focus it at the end of the frame, taking the focus back
+	// from the button the screen focuses as it is presented.
 	FInputModeUIOnly InputMode;
-	InputMode.SetWidgetToFocus(Widget->TakeWidget());
 	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 	SetInputMode(InputMode);
 	bShowMouseCursor = true;
@@ -527,8 +863,12 @@ void ASokobanPlayerController::FocusUI(UUserWidget* Widget)
 
 void ASokobanPlayerController::FocusGame()
 {
-	SetInputMode(FInputModeGameOnly());
-	bShowMouseCursor = false;
+	// The keyboard goes to the game, and the cursor stays up for the HUD's pause button and the editor's tools.
+	FInputModeGameAndUI InputMode;
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	InputMode.SetHideCursorDuringCapture(false);
+	SetInputMode(InputMode);
+	bShowMouseCursor = true;
 }
 
 void ASokobanPlayerController::SokobanSolve(float Delay)
@@ -606,6 +946,133 @@ void ASokobanPlayerController::SokobanScreen(const FString& Screen, float Delay)
 		else if (Screen == TEXT("pause"))
 		{
 			GameMode->PauseGame();
+		}
+		else if (Screen == TEXT("editor"))
+		{
+			GameMode->ShowEditorHome();
+		}
+		else if (Screen == TEXT("saved"))
+		{
+			GameMode->ShowShelf(ESokobanShelf::Saved);
+		}
+		else if (Screen == TEXT("drafts"))
+		{
+			GameMode->ShowShelf(ESokobanShelf::Drafts);
+		}
+		else if (Screen == TEXT("new"))
+		{
+			GameMode->DesignNewLevel();
+		}
+		else if (Screen == TEXT("continue"))
+		{
+			GameMode->ContinueDesign();
+		}
+		else if (Screen == TEXT("testsaved"))
+		{
+			const TArray<FSokobanShelfEntry> Saved = SokobanShelf::List(SokobanShelf::GetDir(ESokobanShelf::Saved));
+			if (Saved.Num() > 0)
+			{
+				GameMode->TestPlayShelfLevel(Saved[0].Data);
+			}
+		}
+		else
+		{
+			UE_LOG(LogSokoban, Warning, TEXT("SokobanScreen: unknown screen '%s'."), *Screen);
+		}
+	}), FMath::Max(Delay, 0.01f), false);
+}
+
+void ASokobanPlayerController::SokobanPick(int32 Index, float Delay)
+{
+	FTimerHandle Timer;
+	GetWorldTimerManager().SetTimer(Timer, FTimerDelegate::CreateWeakLambda(this, [this, Index]()
+	{
+		const bool bPicked = MenuPanel->IsVisible() ? MenuPanel->ActivateButton(Index) : ShelfScreen->IsVisible() && ShelfScreen->ActivateButton(Index);
+		if (!bPicked)
+		{
+			UE_LOG(LogSokoban, Warning, TEXT("SokobanPick: no button %d to click."), Index);
+		}
+	}), FMath::Max(Delay, 0.01f), false);
+}
+
+void ASokobanPlayerController::SokobanEdit(const FString& Brush, int32 X, int32 Y, int32 X2, int32 Y2, float Delay)
+{
+	ESokobanBrush Paint = ESokobanBrush::Floor;
+	if (!ParseBrush(Brush, Paint))
+	{
+		return;
+	}
+
+	const FIntPoint From(X, Y);
+	const FIntPoint To = X2 < 0 ? From : FIntPoint(X2, Y2);
+	FTimerHandle Timer;
+	GetWorldTimerManager().SetTimer(Timer, FTimerDelegate::CreateWeakLambda(this, [this, Paint, From, To]()
+	{
+		if (ASokobanLevelEditor* Editor = GetDrawingEditor())
+		{
+			Editor->PaintRect(From, To, Paint);
+		}
+		else
+		{
+			UE_LOG(LogSokoban, Warning, TEXT("SokobanEdit: not drawing a level."));
+		}
+	}), FMath::Max(Delay, 0.01f), false);
+}
+
+void ASokobanPlayerController::SokobanEditAt(const FString& Brush, float X, float Y, float Delay)
+{
+	ESokobanBrush Paint = ESokobanBrush::Floor;
+	if (!ParseBrush(Brush, Paint))
+	{
+		return;
+	}
+
+	FTimerHandle Timer;
+	GetWorldTimerManager().SetTimer(Timer, FTimerDelegate::CreateWeakLambda(this, [this, Paint, X, Y]()
+	{
+		ASokobanLevelEditor* Editor = GetDrawingEditor();
+		const TOptional<FIntPoint> Cell = Editor ? Editor->CellAtScreen(FVector2D(X, Y)) : TOptional<FIntPoint>();
+		UE_LOG(LogSokoban, Log, TEXT("SokobanEditAt: (%.0f, %.0f) is cell %s"), X, Y, Cell.IsSet() ? *Cell->ToString() : TEXT("none"));
+		if (Cell.IsSet())
+		{
+			Editor->PaintRect(Cell.GetValue(), Cell.GetValue(), Paint);
+		}
+	}), FMath::Max(Delay, 0.01f), false);
+}
+
+void ASokobanPlayerController::SokobanEditAction(const FString& Action, float Delay)
+{
+	FTimerHandle Timer;
+	GetWorldTimerManager().SetTimer(Timer, FTimerDelegate::CreateWeakLambda(this, [this, Action]()
+	{
+		ASokobanGameMode* GameMode = GetSokobanGameMode();
+		ASokobanLevelEditor* Editor = GetDrawingEditor();
+		if (!GameMode || !Editor)
+		{
+			UE_LOG(LogSokoban, Warning, TEXT("SokobanEditAction: not drawing a level."));
+			return;
+		}
+
+		const TMap<FString, TFunction<void()>> Actions = {
+			{ TEXT("undo"), [Editor]() { Editor->Undo(); } },
+			{ TEXT("redo"), [Editor]() { Editor->Redo(); } },
+			{ TEXT("wallin"), [Editor]() { Editor->WallIn(); } },
+			{ TEXT("check"), [Editor]() { Editor->CheckSolvable(); } },
+			{ TEXT("test"), [GameMode]() { GameMode->TestPlayDrawing(); } },
+			{ TEXT("save"), [Editor]() { Editor->SaveLevel(); } },
+			{ TEXT("draft"), [Editor]() { Editor->SaveDraft(); } },
+			{ TEXT("back"), [GameMode]() { GameMode->ShowEditorHome(); } },
+			{ TEXT("wider"), [Editor]() { Editor->Resize(FIntPoint(1, 0)); } },
+			{ TEXT("narrower"), [Editor]() { Editor->Resize(FIntPoint(-1, 0)); } },
+			{ TEXT("taller"), [Editor]() { Editor->Resize(FIntPoint(0, 1)); } },
+			{ TEXT("shorter"), [Editor]() { Editor->Resize(FIntPoint(0, -1)); } } };
+		if (const TFunction<void()>* Run = Actions.Find(Action.ToLower()))
+		{
+			(*Run)();
+		}
+		else
+		{
+			UE_LOG(LogSokoban, Warning, TEXT("SokobanEditAction: unknown action '%s'."), *Action);
 		}
 	}), FMath::Max(Delay, 0.01f), false);
 }

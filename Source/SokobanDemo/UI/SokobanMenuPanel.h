@@ -43,6 +43,9 @@ public:
 	/** Gives keyboard / gamepad focus to the first enabled button. */
 	void FocusFirstButton();
 
+	/** Dev: runs the Index-th button as if clicked. Returns false when there is no such enabled button. */
+	bool ActivateButton(int32 Index);
+
 protected:
 	virtual void NativeOnInitialized() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;

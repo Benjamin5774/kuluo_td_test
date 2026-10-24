@@ -50,6 +50,12 @@ ASokobanBoardView::ASokobanBoardView()
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> GoalSocketAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_GoalSocket.MI_GoalSocket"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> CastleWallAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_CastleWall.MI_CastleWall"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MortarAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_Mortar.MI_Mortar"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> CanvasGridAsset(TEXT("/Game/Sokoban/UI/MI_EditorGrid.MI_EditorGrid"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> CanvasCursorAsset(TEXT("/Game/Sokoban/UI/MI_EditorCursor.MI_EditorCursor"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> CanvasEraseAsset(TEXT("/Game/Sokoban/UI/MI_EditorCursorErase.MI_EditorCursorErase"));
+	CanvasGridMaterial = CanvasGridAsset.Object;
+	CanvasCursorMaterial = CanvasCursorAsset.Object;
+	CanvasEraseMaterial = CanvasEraseAsset.Object;
 	TerrainMaterial = TerrainMaterialAsset.Object;
 	ShelfMaterial = ShelfMaterialAsset.Object;
 	GoalPlateMaterial = GoalPlateAsset.Object;
@@ -73,6 +79,17 @@ ASokobanBoardView::ASokobanBoardView()
 	// Custom data 0: how pressed each plate is (the plate material glows with it).
 	GoalMarkers->NumCustomDataFloats = 1;
 	ShelfTiles = CreateLayer(TEXT("ShelfTiles"), CubeMesh.Object);
+
+	// The level editor's overlay: plates over empty cells and a highlight on the hovered one.
+	CanvasCells = CreateLayer(TEXT("CanvasCells"), CubeMesh.Object);
+	CanvasCells->SetCastShadow(false);
+	CanvasCursor = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CanvasCursor"));
+	CanvasCursor->SetupAttachment(RootComponent);
+	CanvasCursor->SetStaticMesh(CubeMesh.Object);
+	CanvasCursor->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	CanvasCursor->SetCastShadow(false);
+	CanvasCursor->SetMobility(EComponentMobility::Movable);
+	CanvasCursor->SetVisibility(false);
 
 	// The preview copies its meshes from the piece classes when it is built.
 	PreviewCrates = CreateLayer(TEXT("PreviewCrates"), nullptr);
@@ -203,6 +220,7 @@ void ASokobanBoardView::ClearTerrain()
 	GoalMarkers->ClearInstances();
 	GoalCells.Reset();
 	ShelfTiles->ClearInstances();
+	CanvasCells->ClearInstances();
 	for (const TPair<TObjectPtr<UStaticMesh>, TObjectPtr<UInstancedStaticMeshComponent>>& Layer : DressingLayers)
 	{
 		if (IsValid(Layer.Value))
@@ -297,9 +315,8 @@ void ASokobanBoardView::BuildTerrain(const FSokobanLevel& Level)
 
 			if (Layout.GetTile(Cell) == ESokobanTile::Wall)
 			{
-				// The curtain wall stands tall behind and beside the courtyard; in front, and inside it, walls stay low.
 				const bool bCurtain = IsOuterWall(Cell) && !IsFrontWall(Cell);
-				const float Height = bCurtain ? CastleWallHeight : (IsOuterWall(Cell) ? FrontWallHeight : WallHeight);
+				const float Height = WallTop(Cell);
 				WallTiles->AddInstance(FTransform(FRotator::ZeroRotator, Center + FVector(0.f, 0.f, (Height + IslandTop) * 0.5f), FVector(Unit, Unit, (Height - IslandTop) / 100.f)), true);
 				if (!bCurtain)
 				{
@@ -352,6 +369,73 @@ void ASokobanBoardView::BuildTerrain(const FSokobanLevel& Level)
 	}
 
 	BuildDressing(Level);
+	BuildCanvasOverlay();
+}
+
+float ASokobanBoardView::WallTop(const FIntPoint& Cell) const
+{
+	if (Layout.GetTile(Cell) != ESokobanTile::Wall)
+	{
+		return 0.f;
+	}
+	// The curtain wall stands tall behind and beside the courtyard; in front, and inside it, walls stay low.
+	const bool bCurtain = IsOuterWall(Cell) && !IsFrontWall(Cell);
+	return bCurtain ? CastleWallHeight : (IsOuterWall(Cell) ? FrontWallHeight : WallHeight);
+}
+
+void ASokobanBoardView::SetCanvasOverlay(bool bEnabled)
+{
+	bCanvasOverlay = bEnabled;
+	if (!bEnabled)
+	{
+		CanvasCells->ClearInstances();
+		CanvasCursor->SetVisibility(false);
+	}
+}
+
+void ASokobanBoardView::BuildCanvasOverlay()
+{
+	CanvasCells->ClearInstances();
+	if (!bCanvasOverlay)
+	{
+		return;
+	}
+
+	CanvasCells->SetMaterial(0, CanvasGridMaterial);
+	const float Unit = CellSize / 100.f;
+	for (int32 Y = 0; Y < Layout.Size.Y; ++Y)
+	{
+		for (int32 X = 0; X < Layout.Size.X; ++X)
+		{
+			const FIntPoint Cell(X, Y);
+			if (IsVoid(Cell))
+			{
+				CanvasCells->AddInstance(FTransform(FRotator::ZeroRotator, CellToWorld(Cell) + FVector(0.f, 0.f, 1.f), FVector(0.9f * Unit, 0.9f * Unit, 0.02f)), true);
+			}
+		}
+	}
+}
+
+void ASokobanBoardView::SetCanvasCursor(const TOptional<FIntPoint>& Cell, bool bErase)
+{
+	if (!Cell.IsSet() || !Layout.IsInside(Cell.GetValue()))
+	{
+		CanvasCursor->SetVisibility(false);
+		return;
+	}
+
+	// A plate a little proud of whatever tops the cell: the floor, or its wall.
+	const float Unit = CellSize / 100.f;
+	CanvasCursor->SetMaterial(0, bErase ? CanvasEraseMaterial : CanvasCursorMaterial);
+	CanvasCursor->SetWorldLocationAndRotation(CellToWorld(Cell.GetValue()) + FVector(0.f, 0.f, WallTop(Cell.GetValue()) + 3.f), FRotator::ZeroRotator);
+	CanvasCursor->SetWorldScale3D(FVector(0.98f * Unit, 0.98f * Unit, 0.03f));
+	CanvasCursor->SetVisibility(true);
+}
+
+FIntPoint ASokobanBoardView::WorldToCell(const FVector& World) const
+{
+	// The inverse of CellToWorld: north (row - 1) is +X, east (column + 1) is +Y.
+	return FIntPoint(FMath::RoundToInt((World.Y - Origin.Y) / CellSize), FMath::RoundToInt(-(World.X - Origin.X) / CellSize));
 }
 
 bool ASokobanBoardView::IsIsland(const FIntPoint& Cell) const

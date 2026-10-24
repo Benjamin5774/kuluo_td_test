@@ -161,6 +161,18 @@ void USokobanMenuPanel::Present(const FText& Title, const FText& Message, TArray
 	FocusFirstButton();
 }
 
+bool USokobanMenuPanel::ActivateButton(int32 Index)
+{
+	if (!Buttons.IsValidIndex(Index) || !Buttons[Index]->GetIsEnabled() || !Buttons[Index]->OnActivated)
+	{
+		return false;
+	}
+	// Copy first: the action may re-present this panel.
+	const TFunction<void()> Action = Buttons[Index]->OnActivated;
+	Action();
+	return true;
+}
+
 void USokobanMenuPanel::ShowStars(int32 Earned)
 {
 	StarsEarned = FMath::Clamp(Earned, 0, StarImages.Num());

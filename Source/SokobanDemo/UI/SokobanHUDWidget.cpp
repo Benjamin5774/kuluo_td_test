@@ -1,6 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "UI/SokobanHUDWidget.h"
+#include "UI/SokobanButton.h"
 #include "UI/SokobanUIStyle.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/CanvasPanel.h"
@@ -35,7 +36,24 @@ void USokobanHUDWidget::NativeOnInitialized()
 	HintSlot->SetPosition(FVector2D(0.f, -22.f));
 	HintSlot->SetAutoSize(true);
 
-	SetVisibility(ESlateVisibility::HitTestInvisible);
+	// Pause by mouse too. It never takes keyboard focus, which stays with the game.
+	PauseButton = WidgetTree->ConstructWidget<USokobanButton>();
+	PauseButton->InitFocusable(false);
+	PauseButton->SetStyle(SokobanStyle::ButtonStyle());
+	PauseButton->OnActivated = [this]() { if (OnPause) { OnPause(); } };
+	UTextBlock* PauseLabel = SokobanStyle::MakeText(*WidgetTree, LOCTEXT("Pause", "暂停  Esc"), 18, true);
+	PauseButton->SetContent(PauseLabel);
+	UCanvasPanelSlot* PauseSlot = Root->AddChildToCanvas(PauseButton);
+	PauseSlot->SetAnchors(FAnchors(1.f, 0.f));
+	PauseSlot->SetAlignment(FVector2D(1.f, 0.f));
+	PauseSlot->SetPosition(FVector2D(-32.f, 28.f));
+	PauseSlot->SetAutoSize(true);
+
+	// Only the button takes clicks; the rest lets them through to the game.
+	SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	Root->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	Header->SetVisibility(ESlateVisibility::HitTestInvisible);
+	Hint->SetVisibility(ESlateVisibility::HitTestInvisible);
 }
 
 void USokobanHUDWidget::SetLevelTitle(const FText& Title)

@@ -4,6 +4,8 @@
 #include "SokobanDemo.h"
 #include "Game/SokobanPlayerController.h"
 #include "Game/SokobanProgressSubsystem.h"
+#include "LevelEditor/SokobanLevelEditor.h"
+#include "Puzzle/SokobanEditCanvas.h"
 #include "View/SokobanBoardView.h"
 #include "View/SokobanCameraRig.h"
 #include "Components/DirectionalLightComponent.h"
@@ -65,6 +67,9 @@ void ASokobanGameMode::StartPlay()
 	}
 	SceneBounds = BoardView->GetBoundsForSize(LargestSize);
 
+	LevelEditor = GetWorld()->SpawnActor<ASokobanLevelEditor>(ASokobanLevelEditor::StaticClass(), FTransform::Identity, SpawnParams);
+	LevelEditor->Init(BoardView, CameraRig);
+
 	Super::StartPlay();
 
 	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
@@ -102,24 +107,32 @@ void ASokobanGameMode::LoadLevels()
 void ASokobanGameMode::ShowMainMenu()
 {
 	GetWorldTimerManager().ClearTimer(ResultsTimer);
-
-	// The menu keeps a level on the board as its backdrop; after a win, show where the player will continue.
-	if (LevelIndex == INDEX_NONE || bSolved)
-	{
-		LoadLevel(GetContinueIndex());
-	}
+	LeaveDrawing();
+	ShowBackdrop();
 	SetFlowState(ESokobanFlowState::MainMenu);
 }
 
 void ASokobanGameMode::ShowLevelSelect()
 {
 	GetWorldTimerManager().ClearTimer(ResultsTimer);
+	LeaveDrawing();
+	ShowBackdrop();
 	SetFlowState(ESokobanFlowState::LevelSelect);
+}
+
+void ASokobanGameMode::ShowBackdrop()
+{
+	// The menus keep a game level on the board as their backdrop; after a win, show where the player will continue.
+	if (!bBoardShowsCampaign || LevelIndex == INDEX_NONE || bSolved)
+	{
+		LoadLevel(GetContinueIndex());
+	}
 }
 
 void ASokobanGameMode::StartLevel(int32 Index)
 {
 	GetWorldTimerManager().ClearTimer(ResultsTimer);
+	LeaveDrawing();
 	LoadLevel(Index);
 	if (USokobanProgressSubsystem* Progress = GetProgress())
 	{
@@ -128,9 +141,199 @@ void ASokobanGameMode::StartLevel(int32 Index)
 	SetFlowState(ESokobanFlowState::Playing);
 }
 
+bool ASokobanGameMode::HasUnfinishedLevel() const
+{
+	return bBoardShowsCampaign && LevelIndex != INDEX_NONE && !bSolved && Puzzle.GetState().MoveCount > 0;
+}
+
 void ASokobanGameMode::ContinueGame()
 {
+	if (HasUnfinishedLevel())
+	{
+		// The menus kept the level on the board as it was left: carry on from there.
+		SetFlowState(ESokobanFlowState::Playing);
+		return;
+	}
 	StartLevel(GetContinueIndex());
+}
+
+bool ASokobanGameMode::CanContinueGame() const
+{
+	return HasAnyProgress() || HasUnfinishedLevel();
+}
+
+void ASokobanGameMode::StartNewGame()
+{
+	if (USokobanProgressSubsystem* Progress = GetProgress())
+	{
+		Progress->ResetProgress();
+	}
+	StartLevel(0);
+}
+
+void ASokobanGameMode::LeaveDrawing()
+{
+	if (LevelEditor && FlowState == ESokobanFlowState::Editing)
+	{
+		LevelEditor->SaveDraftIfChanged();
+		LevelEditor->Hide();
+	}
+}
+
+void ASokobanGameMode::ShowEditorHome()
+{
+	GetWorldTimerManager().ClearTimer(ResultsTimer);
+	LeaveDrawing();
+	ShowBackdrop();
+	SetFlowState(ESokobanFlowState::EditorHome);
+}
+
+void ASokobanGameMode::ShowShelf(ESokobanShelf Shelf)
+{
+	GetWorldTimerManager().ClearTimer(ResultsTimer);
+	LeaveDrawing();
+	ShowBackdrop();
+	ShownShelf = Shelf;
+	SetFlowState(ESokobanFlowState::EditorShelf);
+}
+
+FString ASokobanGameMode::MakeNewLevelName() const
+{
+	// The first number no level on either shelf is called by, so deleting one doesn't lead to two of a name.
+	TSet<FString> Taken;
+	for (const ESokobanShelf Shelf : { ESokobanShelf::Saved, ESokobanShelf::Drafts })
+	{
+		for (const FSokobanShelfEntry& Entry : SokobanShelf::List(SokobanShelf::GetDir(Shelf)))
+		{
+			Taken.Add(Entry.Data.Name);
+		}
+	}
+	int32 Number = 1;
+	while (Taken.Contains(FString::Printf(TEXT("自制关卡 %d"), Number)))
+	{
+		++Number;
+	}
+	return FString::Printf(TEXT("自制关卡 %d"), Number);
+}
+
+void ASokobanGameMode::DesignNewLevel()
+{
+	bBoardShowsCampaign = false;
+	LevelEditor->Open(FSokobanEditCanvas::MakeWalledRoom(FIntPoint(8, 6)), SokobanShelf::MakeId(), MakeNewLevelName(), false);
+	SetFlowState(ESokobanFlowState::Editing);
+}
+
+bool ASokobanGameMode::CanContinueDesign() const
+{
+	return LevelEditor->HasSession() || SokobanShelf::List(SokobanShelf::GetDir(ESokobanShelf::Drafts)).Num() > 0;
+}
+
+void ASokobanGameMode::ContinueDesign()
+{
+	if (LevelEditor->HasSession())
+	{
+		bBoardShowsCampaign = false;
+		SetFlowState(ESokobanFlowState::Editing);
+		LevelEditor->Show();
+		return;
+	}
+
+	const TArray<FSokobanShelfEntry> Drafts = SokobanShelf::List(SokobanShelf::GetDir(ESokobanShelf::Drafts));
+	if (Drafts.Num() > 0)
+	{
+		EditShelfLevel(ESokobanShelf::Drafts, Drafts[0].Data);
+	}
+}
+
+void ASokobanGameMode::DeleteShelfLevel(ESokobanShelf Shelf, const FString& Id)
+{
+	SokobanShelf::Remove(SokobanShelf::GetDir(Shelf), Id);
+	if (LevelEditor->GetLevelId() == Id)
+	{
+		// Otherwise leaving or continuing the drawing would store it again.
+		LevelEditor->Close();
+	}
+	UE_LOG(LogSokoban, Log, TEXT("Deleted %s from %s"), *Id, Shelf == ESokobanShelf::Saved ? TEXT("saved levels") : TEXT("drafts"));
+}
+
+void ASokobanGameMode::EditShelfLevel(ESokobanShelf Shelf, const FSokobanLevelData& Data)
+{
+	// Drafts are stored exactly as drawn; saved levels are proper level files.
+	FSokobanEditCanvas Canvas = FSokobanEditCanvas::FromRows(Data.Map);
+	if (Shelf == ESokobanShelf::Saved)
+	{
+		FSokobanLevel Level;
+		FString Error;
+		if (FSokobanLevel::FromData(Data, Level, Error))
+		{
+			Canvas = FSokobanEditCanvas::FromLevel(Level);
+		}
+	}
+	bBoardShowsCampaign = false;
+	LevelEditor->Open(Canvas, Data.Id, Data.Name, Shelf == ESokobanShelf::Saved);
+	SetFlowState(ESokobanFlowState::Editing);
+}
+
+void ASokobanGameMode::TestPlayDrawing()
+{
+	if (FlowState != ESokobanFlowState::Editing || !LevelEditor->CanTestPlay())
+	{
+		return;
+	}
+	// The player may leave for the menus from the test play: keep the drawing safe.
+	LevelEditor->SaveDraftIfChanged();
+	LevelEditor->Hide();
+	StartTestPlay(LevelEditor->MakeTestLevel(), ESokobanPlayContext::EditorTest);
+}
+
+void ASokobanGameMode::TestPlayShelfLevel(const FSokobanLevelData& Data)
+{
+	FSokobanLevel Level;
+	FString Error;
+	if (FSokobanLevel::FromData(Data, Level, Error))
+	{
+		StartTestPlay(Level, ESokobanPlayContext::ShelfTest);
+	}
+	else
+	{
+		UE_LOG(LogSokoban, Warning, TEXT("Saved level %s doesn't parse: %s"), *Data.Id, *Error);
+	}
+}
+
+void ASokobanGameMode::StartTestPlay(const FSokobanLevel& Level, ESokobanPlayContext Context)
+{
+	GetWorldTimerManager().ClearTimer(ResultsTimer);
+	PlayContext = Context;
+	TestLevel = Level;
+	Puzzle.Load(Level);
+	bSolved = false;
+	bBoardShowsCampaign = false;
+	LastAnimationTime = 0.f;
+
+	BoardView->BuildLevel(Level);
+	CameraRig->FrameBounds(BoardView->GetPlayBounds(), SceneBounds, false);
+	UE_LOG(LogSokoban, Log, TEXT("Test play: %s (%s), par %d"), *Level.Name, *Level.Id, Level.Par);
+	OnPuzzleChanged.Broadcast();
+	SetFlowState(ESokobanFlowState::Playing);
+}
+
+void ASokobanGameMode::ReplayTestLevel()
+{
+	StartTestPlay(TestLevel, PlayContext);
+}
+
+void ASokobanGameMode::LeaveTestPlay()
+{
+	GetWorldTimerManager().ClearTimer(ResultsTimer);
+	if (PlayContext == ESokobanPlayContext::EditorTest)
+	{
+		SetFlowState(ESokobanFlowState::Editing);
+		LevelEditor->Show();
+	}
+	else
+	{
+		ShowShelf(ESokobanShelf::Saved);
+	}
 }
 
 void ASokobanGameMode::StartNextLevel()
@@ -167,6 +370,8 @@ void ASokobanGameMode::LoadLevel(int32 Index)
 	const FSokobanLevel& Level = Levels[LevelIndex];
 	Puzzle.Load(Level);
 	bSolved = false;
+	bBoardShowsCampaign = true;
+	PlayContext = ESokobanPlayContext::Campaign;
 	LastAnimationTime = 0.f;
 
 	BoardView->BuildLevel(Level);
@@ -263,11 +468,19 @@ void ASokobanGameMode::HandleLevelSolved()
 	LastCompletion.Moves = Puzzle.GetState().MoveCount;
 	LastCompletion.Par = Level.Par;
 	LastCompletion.Stars = FSokobanRules::StarsForSolve(LastCompletion.Moves, Level.Par);
-	LastCompletion.bLastLevel = LevelIndex == Levels.Num() - 1;
+	LastCompletion.bLastLevel = PlayContext == ESokobanPlayContext::Campaign && LevelIndex == Levels.Num() - 1;
 	LastCompletion.bNewBest = false;
-	if (USokobanProgressSubsystem* Progress = GetProgress())
+	if (PlayContext == ESokobanPlayContext::Campaign)
 	{
-		LastCompletion.bNewBest = Progress->RecordSolve(Level.Id, LastCompletion.Moves);
+		if (USokobanProgressSubsystem* Progress = GetProgress())
+		{
+			LastCompletion.bNewBest = Progress->RecordSolve(Level.Id, LastCompletion.Moves);
+		}
+	}
+	else if (PlayContext == ESokobanPlayContext::EditorTest)
+	{
+		// Clearing a test play proves the drawing solvable, even when the solver couldn't tell.
+		LevelEditor->NoteTestPlaySolved(LastCompletion.Moves);
 	}
 	UE_LOG(LogSokoban, Log, TEXT("Solved %s in %d moves (par %d)%s"), *Level.Id, LastCompletion.Moves, Level.Par, LastCompletion.bNewBest ? TEXT(", new best") : TEXT(""));
 
