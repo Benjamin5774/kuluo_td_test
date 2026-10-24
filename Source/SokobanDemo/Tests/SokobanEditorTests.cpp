@@ -48,6 +48,44 @@ bool FSokobanEditorBrushTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSokobanEditorMechanismTest, "Sokoban.Editor.Mechanisms", SokobanEditorTest::Flags)
+bool FSokobanEditorMechanismTest::RunTest(const FString& Parameters)
+{
+	FSokobanEditCanvas Canvas = FSokobanEditCanvas::MakeWalledRoom(FIntPoint(7, 4));
+	Canvas.Paint(FIntPoint(1, 1), ESokobanBrush::Hero);
+	Canvas.Paint(FIntPoint(2, 2), ESokobanBrush::Crate);
+	Canvas.Paint(FIntPoint(5, 1), ESokobanBrush::Goal);
+	Canvas.Paint(FIntPoint(4, 1), ESokobanBrush::Trapdoor);
+	TestEqual(TEXT("A trapdoor needs a plate"), Canvas.FindIssues(), TArray<ESokobanCanvasIssue>{ ESokobanCanvasIssue::TrapdoorWithoutPlate });
+
+	Canvas.Paint(FIntPoint(2, 2), ESokobanBrush::Plate);
+	TestEqual(TEXT("A plate goes under the crate"), Canvas.GetCell(FIntPoint(2, 2)), TEXT('$'));
+	TestEqual(TEXT("...as a mechanism"), Canvas.GetMechanism(FIntPoint(2, 2)), TEXT('P'));
+	TestEqual(TEXT("With a plate the drawing can be played"), Canvas.FindIssues().Num(), 0);
+
+	Canvas.Paint(FIntPoint(4, 1), ESokobanBrush::Goal);
+	TestEqual(TEXT("A goal replaces the trapdoor"), Canvas.GetMechanism(FIntPoint(4, 1)), TEXT(' '));
+	Canvas.Paint(FIntPoint(4, 1), ESokobanBrush::Trapdoor);
+	TestEqual(TEXT("...and a trapdoor the goal"), Canvas.GetCell(FIntPoint(4, 1)), TEXT('-'));
+
+	Canvas.Paint(FIntPoint(2, 2), ESokobanBrush::Erase);
+	TestEqual(TEXT("Erasing takes the crate off the plate first"), Canvas.GetMechanism(FIntPoint(2, 2)), TEXT('P'));
+	Canvas.Paint(FIntPoint(2, 2), ESokobanBrush::Erase);
+	TestTrue(TEXT("then the plate"), Canvas.GetMechanism(FIntPoint(2, 2)) == TEXT(' ') && Canvas.GetCell(FIntPoint(2, 2)) == TEXT('-'));
+	Canvas.Paint(FIntPoint(2, 2), ESokobanBrush::Plate);
+	Canvas.Paint(FIntPoint(3, 2), ESokobanBrush::Crate);
+
+	// Drafts and level files both keep the mechanisms.
+	const FSokobanEditCanvas Draft = FSokobanEditCanvas::FromRows(Canvas.ToRows(), Canvas.ToMechanismRows());
+	TestTrue(TEXT("Draft rows read back unchanged"), Draft == Canvas);
+	FSokobanLevel Parsed;
+	FString Error;
+	TestTrue(FString::Printf(TEXT("The level file parses (%s)"), *Error), FSokobanLevel::FromData(Canvas.ToLevel(TEXT("m"), TEXT("M"), 0).ToData(), Parsed, Error));
+	TestTrue(TEXT("Reading it back gives the same drawing"), FSokobanEditCanvas::FromLevel(Parsed) == Canvas);
+	TestTrue(TEXT("Wall brush clears the mechanism"), Canvas.Paint(FIntPoint(4, 1), ESokobanBrush::Wall) && Canvas.GetMechanism(FIntPoint(4, 1)) == TEXT(' '));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSokobanEditorIssuesTest, "Sokoban.Editor.Issues", SokobanEditorTest::Flags)
 bool FSokobanEditorIssuesTest::RunTest(const FString& Parameters)
 {

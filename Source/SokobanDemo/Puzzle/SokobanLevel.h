@@ -56,7 +56,7 @@ struct FSokobanBoardState
 	}
 };
 
-/** The static part of a level: terrain and goals. */
+/** The static part of a level: terrain, goals and mechanisms. */
 USTRUCT(BlueprintType)
 struct FSokobanLayout
 {
@@ -72,6 +72,14 @@ struct FSokobanLayout
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Sokoban")
 	TArray<FIntPoint> Goals;
+
+	/** Pressure plates, on floor. While a crate or the hero holds down every one of them, the trapdoors are open. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Sokoban")
+	TArray<FIntPoint> Plates;
+
+	/** Trapdoors, on floor: they can only be entered while open (see FSokobanRules::IsTrapdoorOpen). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Sokoban")
+	TArray<FIntPoint> Trapdoors;
 
 	bool IsInside(const FIntPoint& Cell) const
 	{
@@ -92,6 +100,16 @@ struct FSokobanLayout
 	bool IsGoal(const FIntPoint& Cell) const
 	{
 		return Goals.Contains(Cell);
+	}
+
+	bool IsPlate(const FIntPoint& Cell) const
+	{
+		return Plates.Contains(Cell);
+	}
+
+	bool IsTrapdoor(const FIntPoint& Cell) const
+	{
+		return Trapdoors.Contains(Cell);
 	}
 };
 
@@ -117,6 +135,13 @@ struct FSokobanLevelData
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sokoban")
 	TArray<FString> Map;
+
+	/**
+	 * Optional rows of mechanisms laid over Map, cell for cell: 'P' a pressure plate, 'T' a trapdoor, ' ' (or '-')
+	 * nothing. Mechanisms sit on floor, never on a goal, and trapdoors need at least one plate.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sokoban")
+	TArray<FString> Mechanisms;
 
 	/** Moves in the shortest known solution; 0 when unknown. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sokoban")

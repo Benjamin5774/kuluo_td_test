@@ -1,6 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "UI/SokobanButton.h"
+#include "Game/SokobanAudioSubsystem.h"
 #include "UI/SokobanUIStyle.h"
 
 void USokobanButton::SynchronizeProperties()
@@ -11,6 +12,10 @@ void USokobanButton::SynchronizeProperties()
 
 void USokobanButton::HandleClicked()
 {
+	if (USokobanAudioSubsystem* Audio = USokobanAudioSubsystem::Get(this))
+	{
+		Audio->Play(ESokobanSound::Click, 0.5f);
+	}
 	if (OnActivated)
 	{
 		OnActivated();

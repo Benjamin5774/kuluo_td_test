@@ -131,6 +131,41 @@ bool FSokobanLevel::FromData(const FSokobanLevelData& Data, FSokobanLevel& OutLe
 		}
 	}
 
+	// Mechanisms lie over the map and make their cells floor, like any explicit floor.
+	if (Data.Mechanisms.Num() > Height)
+	{
+		OutError = TEXT("There are more rows of mechanisms than rows in the map.");
+		return false;
+	}
+	for (int32 Y = 0; Y < Data.Mechanisms.Num(); ++Y)
+	{
+		const FString& Row = Data.Mechanisms[Y];
+		for (int32 X = 0; X < Row.Len(); ++X)
+		{
+			const TCHAR Char = Row[X];
+			if (Char == TEXT(' ') || Char == TEXT('-'))
+			{
+				continue;
+			}
+			if (Char != TEXT('P') && Char != TEXT('T'))
+			{
+				OutError = FString::Printf(TEXT("Unknown mechanism '%c' at row %d, column %d."), Char, Y + 1, X + 1);
+				return false;
+			}
+
+			const FIntPoint Cell(X, Y);
+			const int32 Index = Y * Width + X;
+			if (X >= Width || Layout.Tiles[Index] == ESokobanTile::Wall || Layout.IsGoal(Cell))
+			{
+				OutError = FString::Printf(TEXT("The mechanism at row %d, column %d must sit on plain floor (not a wall, a goal or outside the map)."), Y + 1, X + 1);
+				return false;
+			}
+			(Char == TEXT('P') ? Layout.Plates : Layout.Trapdoors).Add(Cell);
+			bOpen[Index] = true;
+			Seeds.Add(Cell);
+		}
+	}
+
 	const TArray<bool> Reached = FloodFrom(Layout.Size, Seeds, [&bOpen](int32 Index) { return bOpen[Index]; });
 	for (int32 Index = 0; Index < Reached.Num(); ++Index)
 	{
@@ -160,6 +195,11 @@ bool FSokobanLevel::FromData(const FSokobanLevelData& Data, FSokobanLevel& OutLe
 		OutError = FString::Printf(TEXT("%d goals but only %d crates: the level can never be solved."), Layout.Goals.Num(), State.Crates.Num());
 		return false;
 	}
+	if (Layout.Trapdoors.Num() > 0 && Layout.Plates.Num() == 0)
+	{
+		OutError = TEXT("The map has trapdoors ('T') but no pressure plate ('P') to open them.");
+		return false;
+	}
 	return true;
 }
 
@@ -173,8 +213,10 @@ FSokobanLevelData FSokobanLevel::ToData() const
 	const FIntPoint& Size = Layout.Size;
 	auto IndexOf = [&Size](const FIntPoint& Cell) { return Cell.Y * Size.X + Cell.X; };
 
-	// Floor reachable from a piece or goal can be written as plain spaces; any other floor needs an explicit '-'.
+	// Floor reachable from a piece, goal or mechanism can be written as plain spaces; any other floor needs an explicit '-'.
 	TArray<FIntPoint> Seeds = Layout.Goals;
+	Seeds.Append(Layout.Plates);
+	Seeds.Append(Layout.Trapdoors);
 	Seeds.Append(InitialState.Crates);
 	for (const FSokobanHeroState& Hero : InitialState.Heroes)
 	{
@@ -213,6 +255,20 @@ FSokobanLevelData FSokobanLevel::ToData() const
 			Row.AppendChar(Char);
 		}
 		Data.Map.Add(Row.TrimEnd());
+	}
+
+	if (Layout.Plates.Num() > 0 || Layout.Trapdoors.Num() > 0)
+	{
+		for (int32 Y = 0; Y < Size.Y; ++Y)
+		{
+			FString Row;
+			for (int32 X = 0; X < Size.X; ++X)
+			{
+				const FIntPoint Cell(X, Y);
+				Row.AppendChar(Layout.IsPlate(Cell) ? TEXT('P') : (Layout.IsTrapdoor(Cell) ? TEXT('T') : TEXT(' ')));
+			}
+			Data.Mechanisms.Add(Row.TrimEnd());
+		}
 	}
 	return Data;
 }

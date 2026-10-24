@@ -31,6 +31,7 @@ namespace
 	/**
 	 * Floor cells a crate can never leave: corners that are not goals.
 	 * Crates are only ever pushed, so a crate wedged between two perpendicular blockers is stuck for good.
+	 * Trapdoors are floor here: they open, so they never count as blockers.
 	 */
 	TArray<bool> FindDeadCorners(const FSokobanLayout& Layout)
 	{
@@ -69,7 +70,13 @@ FSokobanSolveResult FSokobanSolver::Solve(const FSokobanLayout& Layout, const FS
 		return Result;
 	}
 
-	const TArray<bool> DeadCorners = FindDeadCorners(Layout);
+	// A crate in a corner can't reach a goal, which matters only when every crate is needed: a spare one may well
+	// be parked for good, say holding down a pressure plate.
+	TArray<bool> DeadCorners = FindDeadCorners(Layout);
+	if (Start.Crates.Num() > Layout.Goals.Num())
+	{
+		DeadCorners.Init(false, DeadCorners.Num());
+	}
 
 	// Breadth-first search; each node remembers its parent and the move that reached it.
 	TArray<FSokobanBoardState> States;

@@ -8,16 +8,18 @@ const FIntPoint FSokobanEditCanvas::MaxSize(12, 9);
 
 namespace
 {
-	/** A canvas cell taken apart: what it is made of, whether it is a goal, and the piece standing on it. */
+	/** A canvas cell taken apart: what it is made of, whether it is a goal, its mechanism and the piece standing on it. */
 	struct FCellParts
 	{
 		ESokobanTile Base = ESokobanTile::Void;
 		bool bGoal = false;
 		/** '$' a crate, '@' the hero, 0 nothing. */
 		TCHAR Piece = 0;
+		/** 'P' a pressure plate, 'T' a trapdoor, 0 nothing. Only on floor that is no goal. */
+		TCHAR Mechanism = 0;
 	};
 
-	FCellParts Decode(TCHAR Char)
+	FCellParts Decode(TCHAR Char, TCHAR Mechanism = TEXT(' '))
 	{
 		FCellParts Parts;
 		switch (Char)
@@ -46,6 +48,10 @@ namespace
 		default:
 			break;
 		}
+		if (Parts.Base == ESokobanTile::Floor && !Parts.bGoal && (Mechanism == TEXT('P') || Mechanism == TEXT('T')))
+		{
+			Parts.Mechanism = Mechanism;
+		}
 		return Parts;
 	}
 
@@ -70,6 +76,11 @@ namespace
 		return Parts.bGoal ? TEXT('.') : TEXT('-');
 	}
 
+	TCHAR EncodeMechanism(const FCellParts& Parts)
+	{
+		return Parts.Base == ESokobanTile::Floor && !Parts.bGoal && Parts.Mechanism != 0 ? Parts.Mechanism : TEXT(' ');
+	}
+
 	FIntPoint ClampSize(const FIntPoint& Size)
 	{
 		return FIntPoint(FMath::Clamp(Size.X, FSokobanEditCanvas::MinSize.X, FSokobanEditCanvas::MaxSize.X),
@@ -82,6 +93,7 @@ FSokobanEditCanvas FSokobanEditCanvas::MakeWalledRoom(const FIntPoint& InSize)
 	FSokobanEditCanvas Canvas;
 	Canvas.Size = ClampSize(InSize);
 	Canvas.Cells.Init(TEXT('-'), Canvas.Size.X * Canvas.Size.Y);
+	Canvas.Mechanisms.Init(TEXT(' '), Canvas.Size.X * Canvas.Size.Y);
 	for (int32 Y = 0; Y < Canvas.Size.Y; ++Y)
 	{
 		for (int32 X = 0; X < Canvas.Size.X; ++X)
@@ -95,7 +107,7 @@ FSokobanEditCanvas FSokobanEditCanvas::MakeWalledRoom(const FIntPoint& InSize)
 	return Canvas;
 }
 
-FSokobanEditCanvas FSokobanEditCanvas::FromRows(const TArray<FString>& Rows)
+FSokobanEditCanvas FSokobanEditCanvas::FromRows(const TArray<FString>& Rows, const TArray<FString>& MechanismRows)
 {
 	FSokobanEditCanvas Canvas;
 	int32 Width = 0;
@@ -105,13 +117,17 @@ FSokobanEditCanvas FSokobanEditCanvas::FromRows(const TArray<FString>& Rows)
 	}
 	Canvas.Size = FIntPoint(Width, Rows.Num());
 	Canvas.Cells.Init(TEXT(' '), Width * Rows.Num());
+	Canvas.Mechanisms.Init(TEXT(' '), Width * Rows.Num());
 	for (int32 Y = 0; Y < Rows.Num(); ++Y)
 	{
 		for (int32 X = 0; X < Rows[Y].Len(); ++X)
 		{
 			const TCHAR Char = Rows[Y][X] == TEXT('_') ? TEXT('-') : Rows[Y][X];
-			// Round-tripping through Decode turns anything unknown into void.
-			Canvas.Cells[Canvas.IndexOf(FIntPoint(X, Y))] = Encode(Decode(Char));
+			const TCHAR Mechanism = MechanismRows.IsValidIndex(Y) && X < MechanismRows[Y].Len() ? MechanismRows[Y][X] : TEXT(' ');
+			// Round-tripping through Decode turns anything unknown into void, or into no mechanism.
+			const FCellParts Parts = Decode(Char, Mechanism);
+			Canvas.Cells[Canvas.IndexOf(FIntPoint(X, Y))] = Encode(Parts);
+			Canvas.Mechanisms[Canvas.IndexOf(FIntPoint(X, Y))] = EncodeMechanism(Parts);
 		}
 	}
 	return Canvas;
@@ -122,6 +138,7 @@ FSokobanEditCanvas FSokobanEditCanvas::FromLevel(const FSokobanLevel& Level)
 	FSokobanEditCanvas Canvas;
 	Canvas.Size = Level.Layout.Size;
 	Canvas.Cells.Init(TEXT(' '), Canvas.Size.X * Canvas.Size.Y);
+	Canvas.Mechanisms.Init(TEXT(' '), Canvas.Size.X * Canvas.Size.Y);
 	for (int32 Y = 0; Y < Canvas.Size.Y; ++Y)
 	{
 		for (int32 X = 0; X < Canvas.Size.X; ++X)
@@ -132,6 +149,7 @@ FSokobanEditCanvas FSokobanEditCanvas::FromLevel(const FSokobanLevel& Level)
 			if (Parts.Base == ESokobanTile::Floor)
 			{
 				Parts.bGoal = Level.Layout.IsGoal(Cell);
+				Parts.Mechanism = Level.Layout.IsPlate(Cell) ? TEXT('P') : (Level.Layout.IsTrapdoor(Cell) ? TEXT('T') : 0);
 				if (Level.InitialState.FindHeroAt(Cell) != INDEX_NONE)
 				{
 					Parts.Piece = TEXT('@');
@@ -142,6 +160,7 @@ FSokobanEditCanvas FSokobanEditCanvas::FromLevel(const FSokobanLevel& Level)
 				}
 			}
 			Canvas.Cells[Canvas.IndexOf(Cell)] = Encode(Parts);
+			Canvas.Mechanisms[Canvas.IndexOf(Cell)] = EncodeMechanism(Parts);
 		}
 	}
 	return Canvas;
@@ -157,6 +176,11 @@ TCHAR FSokobanEditCanvas::GetCell(const FIntPoint& Cell) const
 	return IsInside(Cell) ? Cells[IndexOf(Cell)] : TEXT(' ');
 }
 
+TCHAR FSokobanEditCanvas::GetMechanism(const FIntPoint& Cell) const
+{
+	return IsInside(Cell) ? Mechanisms[IndexOf(Cell)] : TEXT(' ');
+}
+
 bool FSokobanEditCanvas::Paint(const FIntPoint& Cell, ESokobanBrush Brush)
 {
 	if (!IsInside(Cell))
@@ -165,6 +189,7 @@ bool FSokobanEditCanvas::Paint(const FIntPoint& Cell, ESokobanBrush Brush)
 	}
 
 	const TArray<TCHAR> Before = Cells;
+	const TArray<TCHAR> MechanismsBefore = Mechanisms;
 	if (Brush == ESokobanBrush::Hero)
 	{
 		// There is only one hero: placing it somewhere takes it away from wherever it stood.
@@ -174,20 +199,24 @@ bool FSokobanEditCanvas::Paint(const FIntPoint& Cell, ESokobanBrush Brush)
 		}
 	}
 
-	FCellParts Parts = Decode(Cells[IndexOf(Cell)]);
+	const int32 Index = IndexOf(Cell);
+	FCellParts Parts = Decode(Cells[Index], Mechanisms[Index]);
 	switch (Brush)
 	{
 	case ESokobanBrush::Floor:
 		Parts.Base = ESokobanTile::Floor;
 		Parts.bGoal = false;
+		Parts.Mechanism = 0;
 		break;
 	case ESokobanBrush::Wall:
 		Parts = FCellParts();
 		Parts.Base = ESokobanTile::Wall;
 		break;
 	case ESokobanBrush::Goal:
+		// A goal, a plate and a trapdoor each take the whole floor of a cell.
 		Parts.Base = ESokobanTile::Floor;
 		Parts.bGoal = true;
+		Parts.Mechanism = 0;
 		break;
 	case ESokobanBrush::Crate:
 		Parts.Base = ESokobanTile::Floor;
@@ -197,14 +226,21 @@ bool FSokobanEditCanvas::Paint(const FIntPoint& Cell, ESokobanBrush Brush)
 		Parts.Base = ESokobanTile::Floor;
 		Parts.Piece = TEXT('@');
 		break;
+	case ESokobanBrush::Plate:
+	case ESokobanBrush::Trapdoor:
+		Parts.Base = ESokobanTile::Floor;
+		Parts.bGoal = false;
+		Parts.Mechanism = Brush == ESokobanBrush::Plate ? TEXT('P') : TEXT('T');
+		break;
 	case ESokobanBrush::Erase:
 		if (Parts.Piece != 0)
 		{
 			Parts.Piece = 0;
 		}
-		else if (Parts.bGoal)
+		else if (Parts.bGoal || Parts.Mechanism != 0)
 		{
 			Parts.bGoal = false;
+			Parts.Mechanism = 0;
 		}
 		else
 		{
@@ -212,8 +248,9 @@ bool FSokobanEditCanvas::Paint(const FIntPoint& Cell, ESokobanBrush Brush)
 		}
 		break;
 	}
-	Cells[IndexOf(Cell)] = Encode(Parts);
-	return Cells != Before;
+	Cells[Index] = Encode(Parts);
+	Mechanisms[Index] = EncodeMechanism(Parts);
+	return Cells != Before || Mechanisms != MechanismsBefore;
 }
 
 bool FSokobanEditCanvas::Resize(const FIntPoint& NewSize)
@@ -227,11 +264,13 @@ bool FSokobanEditCanvas::Resize(const FIntPoint& NewSize)
 	FSokobanEditCanvas Resized;
 	Resized.Size = Clamped;
 	Resized.Cells.Init(TEXT(' '), Clamped.X * Clamped.Y);
+	Resized.Mechanisms.Init(TEXT(' '), Clamped.X * Clamped.Y);
 	for (int32 Y = 0; Y < FMath::Min(Size.Y, Clamped.Y); ++Y)
 	{
 		for (int32 X = 0; X < FMath::Min(Size.X, Clamped.X); ++X)
 		{
 			Resized.Cells[Resized.IndexOf(FIntPoint(X, Y))] = Cells[IndexOf(FIntPoint(X, Y))];
+			Resized.Mechanisms[Resized.IndexOf(FIntPoint(X, Y))] = Mechanisms[IndexOf(FIntPoint(X, Y))];
 		}
 	}
 	*this = MoveTemp(Resized);
@@ -251,7 +290,7 @@ bool FSokobanEditCanvas::WallIn()
 		for (int32 X = 0; X < Size.X; ++X)
 		{
 			const FIntPoint Cell(X, Y);
-			const FCellParts Parts = Decode(Before[IndexOf(Cell)]);
+			const FCellParts Parts = Decode(Before[IndexOf(Cell)], Mechanisms[IndexOf(Cell)]);
 			if (Parts.Base == ESokobanTile::Void)
 			{
 				// Void next to floor (diagonals too, for closed corners) becomes wall.
@@ -266,7 +305,7 @@ bool FSokobanEditCanvas::WallIn()
 					}
 				}
 			}
-			else if (Parts.Base == ESokobanTile::Floor && !Parts.bGoal && Parts.Piece == 0
+			else if (Parts.Base == ESokobanTile::Floor && !Parts.bGoal && Parts.Piece == 0 && Parts.Mechanism == 0
 				&& (X == 0 || Y == 0 || X == Size.X - 1 || Y == Size.Y - 1))
 			{
 				// Bare floor on the edge of the canvas has nowhere outside it for a wall: it becomes the wall.
@@ -292,6 +331,25 @@ TArray<FString> FSokobanEditCanvas::ToRows() const
 	return Rows;
 }
 
+TArray<FString> FSokobanEditCanvas::ToMechanismRows() const
+{
+	TArray<FString> Rows;
+	if (!Mechanisms.ContainsByPredicate([](TCHAR Mechanism) { return Mechanism != TEXT(' '); }))
+	{
+		return Rows;
+	}
+	for (int32 Y = 0; Y < Size.Y; ++Y)
+	{
+		FString Row;
+		for (int32 X = 0; X < Size.X; ++X)
+		{
+			Row.AppendChar(Mechanisms[IndexOf(FIntPoint(X, Y))]);
+		}
+		Rows.Add(Row.TrimEnd());
+	}
+	return Rows;
+}
+
 FSokobanLevel FSokobanEditCanvas::ToLevel(const FString& Id, const FString& Name, int32 Par) const
 {
 	FSokobanLevel Level;
@@ -305,11 +363,19 @@ FSokobanLevel FSokobanEditCanvas::ToLevel(const FString& Id, const FString& Name
 		for (int32 X = 0; X < Size.X; ++X)
 		{
 			const FIntPoint Cell(X, Y);
-			const FCellParts Parts = Decode(Cells[IndexOf(Cell)]);
+			const FCellParts Parts = Decode(Cells[IndexOf(Cell)], Mechanisms[IndexOf(Cell)]);
 			Level.Layout.Tiles[IndexOf(Cell)] = Parts.Base;
 			if (Parts.bGoal)
 			{
 				Level.Layout.Goals.Add(Cell);
+			}
+			if (Parts.Mechanism == TEXT('P'))
+			{
+				Level.Layout.Plates.Add(Cell);
+			}
+			else if (Parts.Mechanism == TEXT('T'))
+			{
+				Level.Layout.Trapdoors.Add(Cell);
 			}
 			if (Parts.Piece == TEXT('$'))
 			{
@@ -341,6 +407,10 @@ TArray<ESokobanCanvasIssue> FSokobanEditCanvas::FindIssues() const
 	if (CountCrates() < Goals)
 	{
 		Issues.Add(ESokobanCanvasIssue::TooFewCrates);
+	}
+	if (Mechanisms.Contains(TEXT('T')) && !Mechanisms.Contains(TEXT('P')))
+	{
+		Issues.Add(ESokobanCanvasIssue::TrapdoorWithoutPlate);
 	}
 
 	for (int32 Index = 0; Index < Cells.Num(); ++Index)

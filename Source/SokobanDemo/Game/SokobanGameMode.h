@@ -11,6 +11,7 @@
 class ASokobanBoardView;
 class ASokobanCameraRig;
 class ASokobanLevelEditor;
+class ASokobanTitleStage;
 class USokobanProgressSubsystem;
 
 /** Which screen the game is on. */
@@ -121,6 +122,9 @@ public:
 	ESokobanPlayContext GetPlayContext() const { return PlayContext; }
 	ASokobanLevelEditor* GetLevelEditor() const { return LevelEditor; }
 
+	/** The title screen's scene, shown with the main menu. */
+	ASokobanTitleStage* GetTitleStage() const { return TitleStage; }
+
 	/** Starts the level after the current one, or returns to level select after the last. */
 	void StartNextLevel();
 
@@ -200,8 +204,14 @@ private:
 	/** Puts a game level back on the board for the menus, if the board shows something else. */
 	void ShowBackdrop();
 
-	/** The board still shows a game level the player has made moves in but not solved. */
+	/** The game level being played was left half-played (moves made, not solved) for the menus. */
 	bool HasUnfinishedLevel() const;
+
+	/** Puts that level back on the board as it was left. */
+	void ShowUnfinishedLevel();
+
+	/** The castle the title screen shows: a plain walled courtyard, built as a showcase. */
+	static FSokobanLevel MakeTitleCastle();
 
 	/** Leaves the drawing: stores a draft of any changes and takes it off the board. */
 	void LeaveDrawing();
@@ -250,4 +260,7 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<ASokobanLevelEditor> LevelEditor;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ASokobanTitleStage> TitleStage;
 };

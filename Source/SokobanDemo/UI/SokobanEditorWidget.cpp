@@ -101,7 +101,8 @@ void USokobanEditorWidget::NativeOnInitialized()
 	Brushes->AddChildToVerticalBox(SokobanStyle::MakeText(*WidgetTree, LOCTEXT("Brushes", "笔刷"), 16, true, SokobanStyle::TextDim))->SetPadding(FMargin(4.f, 0.f, 0.f, 6.f));
 	const FText BrushLabels[] = {
 		LOCTEXT("Floor", "1  地面"), LOCTEXT("Wall", "2  墙"), LOCTEXT("Crate", "3  箱子"),
-		LOCTEXT("Goal", "4  目标点"), LOCTEXT("Hero", "5  大橘"), LOCTEXT("Erase", "6  擦除") };
+		LOCTEXT("Goal", "4  目标点"), LOCTEXT("Hero", "5  大橘"), LOCTEXT("Plate", "6  机关"),
+		LOCTEXT("Trapdoor", "7  活板门"), LOCTEXT("Erase", "8  擦除") };
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(BrushLabels); ++Index)
 	{
 		const ESokobanBrush Brush = static_cast<ESokobanBrush>(Index);
@@ -131,7 +132,7 @@ void USokobanEditorWidget::NativeOnInitialized()
 	StatusText->SetJustification(ETextJustify::Center);
 	StatusColumn->AddChildToVerticalBox(StatusText)->SetHorizontalAlignment(HAlign_Center);
 	UTextBlock* Controls = SokobanStyle::MakeText(*WidgetTree,
-		LOCTEXT("Controls", "左键画    右键擦    1–6 换笔刷    Ctrl+Z 撤销    Ctrl+Y 重做    滚轮 缩放"), 14, false, SokobanStyle::TextDim);
+		LOCTEXT("Controls", "左键画    右键擦    1–8 换笔刷    Ctrl+Z 撤销    Ctrl+Y 重做    滚轮 缩放"), 14, false, SokobanStyle::TextDim);
 	Controls->SetJustification(ETextJustify::Center);
 	StatusColumn->AddChildToVerticalBox(Controls)->SetPadding(FMargin(0.f, 4.f, 0.f, 0.f));
 

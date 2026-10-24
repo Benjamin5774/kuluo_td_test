@@ -13,8 +13,11 @@
 #include "UI/SokobanLevelSelectWidget.h"
 #include "UI/SokobanMenuPanel.h"
 #include "UI/SokobanShelfWidget.h"
+#include "UI/SokobanTitleWidget.h"
 #include "View/SokobanBoardView.h"
 #include "View/SokobanCameraRig.h"
+#include "View/SokobanTitleStage.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Blueprint/UserWidget.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -54,23 +57,26 @@ namespace
 			return LOCTEXT("DraftNoGoal", "还没有目标点");
 		case ESokobanCanvasIssue::TooFewCrates:
 			return LOCTEXT("DraftFewCrates", "箱子不够");
+		case ESokobanCanvasIssue::TrapdoorWithoutPlate:
+			return LOCTEXT("DraftNoPlate", "活板门缺机关");
 		default:
 			return LOCTEXT("DraftOpen", "墙没围好");
 		}
 	}
 
-	/** Dev commands: a brush by name (floor, wall, crate, goal, hero or erase). */
+	/** Dev commands: a brush by name (floor, wall, crate, goal, hero, plate, trapdoor or erase). */
 	bool ParseBrush(const FString& Name, ESokobanBrush& OutBrush)
 	{
 		static const TMap<FString, ESokobanBrush> Names = {
 			{ TEXT("floor"), ESokobanBrush::Floor }, { TEXT("wall"), ESokobanBrush::Wall }, { TEXT("crate"), ESokobanBrush::Crate },
-			{ TEXT("goal"), ESokobanBrush::Goal }, { TEXT("hero"), ESokobanBrush::Hero }, { TEXT("erase"), ESokobanBrush::Erase } };
+			{ TEXT("goal"), ESokobanBrush::Goal }, { TEXT("hero"), ESokobanBrush::Hero }, { TEXT("plate"), ESokobanBrush::Plate },
+			{ TEXT("trapdoor"), ESokobanBrush::Trapdoor }, { TEXT("erase"), ESokobanBrush::Erase } };
 		if (const ESokobanBrush* Found = Names.Find(Name.ToLower()))
 		{
 			OutBrush = *Found;
 			return true;
 		}
-		UE_LOG(LogSokoban, Warning, TEXT("Unknown brush '%s' (floor, wall, crate, goal, hero or erase)."), *Name);
+		UE_LOG(LogSokoban, Warning, TEXT("Unknown brush '%s' (floor, wall, crate, goal, hero, plate, trapdoor or erase)."), *Name);
 		return false;
 	}
 
@@ -93,6 +99,7 @@ ASokobanPlayerController::ASokobanPlayerController()
 	LevelSelectClass = USokobanLevelSelectWidget::StaticClass();
 	EditorScreenClass = USokobanEditorWidget::StaticClass();
 	ShelfScreenClass = USokobanShelfWidget::StaticClass();
+	TitleScreenClass = USokobanTitleWidget::StaticClass();
 }
 
 void ASokobanPlayerController::BeginPlay()
@@ -149,6 +156,10 @@ void ASokobanPlayerController::CreateWidgets()
 	ShelfScreen = CreateWidget<USokobanShelfWidget>(this, ShelfScreenClass);
 	ShelfScreen->AddToViewport(10);
 	ShelfScreen->SetVisibility(ESlateVisibility::Collapsed);
+
+	TitleScreen = CreateWidget<USokobanTitleWidget>(this, TitleScreenClass);
+	TitleScreen->AddToViewport(10);
+	TitleScreen->SetVisibility(ESlateVisibility::Collapsed);
 }
 
 void ASokobanPlayerController::CreateInputMappings()
@@ -184,7 +195,8 @@ void ASokobanPlayerController::CreateInputMappings()
 	RedoAction = MakeAction(TEXT("IA_Redo"), { EKeys::Y });
 	const FKey BrushKeys[][2] = {
 		{ EKeys::One, EKeys::NumPadOne }, { EKeys::Two, EKeys::NumPadTwo }, { EKeys::Three, EKeys::NumPadThree },
-		{ EKeys::Four, EKeys::NumPadFour }, { EKeys::Five, EKeys::NumPadFive }, { EKeys::Six, EKeys::NumPadSix } };
+		{ EKeys::Four, EKeys::NumPadFour }, { EKeys::Five, EKeys::NumPadFive }, { EKeys::Six, EKeys::NumPadSix },
+		{ EKeys::Seven, EKeys::NumPadSeven }, { EKeys::Eight, EKeys::NumPadEight } };
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(BrushKeys); ++Index)
 	{
 		BrushActions.Add(MakeAction(*FString::Printf(TEXT("IA_Brush%d"), Index + 1), { BrushKeys[Index][0], BrushKeys[Index][1] }));
@@ -502,6 +514,25 @@ void ASokobanPlayerController::HandleFlowStateChanged(ESokobanFlowState State)
 		AutoMoves.Reset();
 	}
 
+	// The main menu films the title scene; everything else the board. A short fade from black covers the cut, and
+	// the board being rebuilt behind it.
+	if (ASokobanGameMode* GameMode = GetSokobanGameMode())
+	{
+		AActor* Camera = GameMode->GetCameraRig();
+		if (State == ESokobanFlowState::MainMenu && GameMode->GetTitleStage())
+		{
+			Camera = GameMode->GetTitleStage();
+		}
+		if (Camera && GetViewTarget() != Camera)
+		{
+			SetViewTarget(Camera);
+			if (PlayerCameraManager)
+			{
+				PlayerCameraManager->StartCameraFade(1.f, 0.f, CutFadeTime, FLinearColor::Black);
+			}
+		}
+	}
+
 	if (!HUD)
 	{
 		return;
@@ -514,6 +545,7 @@ void ASokobanPlayerController::HandleFlowStateChanged(ESokobanFlowState State)
 	MenuPanel->SetVisibility(ESlateVisibility::Collapsed);
 	LevelSelect->SetVisibility(ESlateVisibility::Collapsed);
 	ShelfScreen->SetVisibility(ESlateVisibility::Collapsed);
+	TitleScreen->SetVisibility(ESlateVisibility::Collapsed);
 
 	switch (State)
 	{
@@ -571,7 +603,7 @@ void ASokobanPlayerController::HandlePuzzleChanged()
 	HUD->SetStats(FText::Join(FText::FromString(TEXT("      ")), Stats));
 }
 
-void ASokobanPlayerController::PresentMainMenu()
+void ASokobanPlayerController::PresentMainMenu(bool bIntro)
 {
 	TWeakObjectPtr<ASokobanGameMode> GameMode = GetSokobanGameMode();
 	TWeakObjectPtr<ASokobanPlayerController> WeakThis = this;
@@ -597,7 +629,7 @@ void ASokobanPlayerController::PresentMainMenu()
 			LOCTEXT("NewGameMessage", "通关记录和最佳步数会被清除，\n从第 1 关重新开始。\n自制的关卡不受影响。"),
 			LOCTEXT("NewGameConfirm", "清除进度，重新开始"),
 			[GameMode]() { if (GameMode.IsValid()) { GameMode->StartNewGame(); } },
-			[WeakThis]() { if (WeakThis.IsValid()) { WeakThis->PresentMainMenu(); } });
+			[WeakThis]() { if (WeakThis.IsValid()) { WeakThis->PresentMainMenu(false); } });
 	};
 
 	TArray<FSokobanMenuItem> Items;
@@ -607,9 +639,10 @@ void ASokobanPlayerController::PresentMainMenu()
 	Items.Add({ LOCTEXT("Editor", "关卡编辑器"), [GameMode]() { if (GameMode.IsValid()) { GameMode->ShowEditorHome(); } } });
 	Items.Add({ LOCTEXT("Quit", "退出游戏"), [WeakThis]() { if (WeakThis.IsValid()) { UKismetSystemLibrary::QuitGame(WeakThis.Get(), WeakThis.Get(), EQuitPreference::Quit, false); } } });
 
-	MenuPanel->SetVisibility(ESlateVisibility::Visible);
+	MenuPanel->SetVisibility(ESlateVisibility::Collapsed);
+	TitleScreen->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	FocusUI();
-	MenuPanel->Present(LOCTEXT("GameTitle", "浮岛搬运行会"), LOCTEXT("Tagline", "大力士一次能推动面前的一整排箱子。\n把每个箱子送上发光的目标点。"), MoveTemp(Items), nullptr);
+	TitleScreen->Present(MoveTemp(Items), bIntro);
 }
 
 void ASokobanPlayerController::PresentLevelSelect()
@@ -793,7 +826,7 @@ void ASokobanPlayerController::PresentShelf()
 	for (const FSokobanShelfEntry& Entry : SokobanShelf::List(SokobanShelf::GetDir(Shelf)))
 	{
 		const FSokobanLevelData Data = Entry.Data;
-		const FSokobanEditCanvas Canvas = FSokobanEditCanvas::FromRows(Data.Map);
+		const FSokobanEditCanvas Canvas = FSokobanEditCanvas::FromRows(Data.Map, Data.Mechanisms);
 		const FText Size = FText::Format(LOCTEXT("ShelfSize", "{0} × {1}"), Canvas.GetSize().X, Canvas.GetSize().Y);
 
 		FSokobanShelfRow& Row = Rows.AddDefaulted_GetRef();
@@ -846,6 +879,7 @@ void ASokobanPlayerController::PresentConfirm(const FText& Title, const FText& M
 
 	LevelSelect->SetVisibility(ESlateVisibility::Collapsed);
 	ShelfScreen->SetVisibility(ESlateVisibility::Collapsed);
+	TitleScreen->SetVisibility(ESlateVisibility::Collapsed);
 	MenuPanel->SetVisibility(ESlateVisibility::Visible);
 	FocusUI();
 	MenuPanel->Present(Title, Message, MoveTemp(Items), MoveTemp(OnCancel));
@@ -987,7 +1021,19 @@ void ASokobanPlayerController::SokobanPick(int32 Index, float Delay)
 	FTimerHandle Timer;
 	GetWorldTimerManager().SetTimer(Timer, FTimerDelegate::CreateWeakLambda(this, [this, Index]()
 	{
-		const bool bPicked = MenuPanel->IsVisible() ? MenuPanel->ActivateButton(Index) : ShelfScreen->IsVisible() && ShelfScreen->ActivateButton(Index);
+		bool bPicked = false;
+		if (MenuPanel->IsVisible())
+		{
+			bPicked = MenuPanel->ActivateButton(Index);
+		}
+		else if (TitleScreen->IsVisible())
+		{
+			bPicked = TitleScreen->ActivateButton(Index);
+		}
+		else if (ShelfScreen->IsVisible())
+		{
+			bPicked = ShelfScreen->ActivateButton(Index);
+		}
 		if (!bPicked)
 		{
 			UE_LOG(LogSokoban, Warning, TEXT("SokobanPick: no button %d to click."), Index);
@@ -1036,6 +1082,37 @@ void ASokobanPlayerController::SokobanEditAt(const FString& Brush, float X, floa
 		if (Cell.IsSet())
 		{
 			Editor->PaintRect(Cell.GetValue(), Cell.GetValue(), Paint);
+		}
+	}), FMath::Max(Delay, 0.01f), false);
+}
+
+void ASokobanPlayerController::SokobanTitleView(float X, float Y, float Z, float Distance, float Yaw, float Pitch, float Fov, float Delay)
+{
+	FTimerHandle Timer;
+	GetWorldTimerManager().SetTimer(Timer, FTimerDelegate::CreateWeakLambda(this, [this, X, Y, Z, Distance, Yaw, Pitch, Fov]()
+	{
+		ASokobanGameMode* GameMode = GetSokobanGameMode();
+		if (ASokobanTitleStage* Stage = GameMode ? GameMode->GetTitleStage() : nullptr)
+		{
+			Stage->Focus = FVector(X, Y, Z);
+			Stage->Distance = Distance;
+			Stage->Yaw = Yaw;
+			Stage->Pitch = Pitch;
+			Stage->FieldOfView = Fov;
+		}
+	}), FMath::Max(Delay, 0.01f), false);
+}
+
+void ASokobanPlayerController::SokobanTitleBeach(float X, float Y, float Delay)
+{
+	FTimerHandle Timer;
+	GetWorldTimerManager().SetTimer(Timer, FTimerDelegate::CreateWeakLambda(this, [this, X, Y]()
+	{
+		ASokobanGameMode* GameMode = GetSokobanGameMode();
+		if (ASokobanTitleStage* Stage = GameMode ? GameMode->GetTitleStage() : nullptr)
+		{
+			Stage->SetActorLocation(FVector(X, Y, 0.f));
+			Stage->Show();
 		}
 	}), FMath::Max(Delay, 0.01f), false);
 }

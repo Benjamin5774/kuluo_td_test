@@ -13,7 +13,10 @@ enum class ESokobanBrush : uint8
 	Crate,
 	Goal,
 	Hero,
-	/** Takes away the top-most thing in a cell: a piece, then a goal, then the floor or wall itself. */
+	/** A pressure plate: holding it down opens the trapdoors. */
+	Plate,
+	Trapdoor,
+	/** Takes away the top-most thing in a cell: a piece, then a goal or mechanism, then the floor or wall itself. */
 	Erase
 };
 
@@ -23,13 +26,16 @@ enum class ESokobanCanvasIssue : uint8
 	NoHero,
 	NoGoal,
 	TooFewCrates,
+	/** There are trapdoors but no pressure plate that could open them. */
+	TrapdoorWithoutPlate,
 	/** Some floor touches the void or the edge of the canvas instead of a wall. */
 	NotEnclosed
 };
 
 /**
- * A level being drawn in the editor, as a grid of XSB characters. Unlike in level files, ' ' is always void and
- * '-' is always floor, so a draft keeps exactly what was drawn even before it is walled in. Pure logic.
+ * A level being drawn in the editor, as a grid of XSB characters plus a grid of mechanisms ('P' plate, 'T' trapdoor,
+ * ' ' none). Unlike in level files, ' ' is always void and '-' is always floor, so a draft keeps exactly what was
+ * drawn even before it is walled in. Pure logic.
  */
 class SOKOBANDEMO_API FSokobanEditCanvas
 {
@@ -41,8 +47,8 @@ public:
 	/** A canvas of Size: floor ringed by walls, the usual starting point. */
 	static FSokobanEditCanvas MakeWalledRoom(const FIntPoint& Size);
 
-	/** Exactly the rows of a draft (unknown characters become void). */
-	static FSokobanEditCanvas FromRows(const TArray<FString>& Rows);
+	/** Exactly the rows of a draft, map and mechanisms (unknown characters become void, or no mechanism). */
+	static FSokobanEditCanvas FromRows(const TArray<FString>& Rows, const TArray<FString>& MechanismRows = {});
 
 	/** A playable level (saved or shipped), to draw on further. */
 	static FSokobanEditCanvas FromLevel(const FSokobanLevel& Level);
@@ -52,6 +58,9 @@ public:
 
 	/** The cell's character; ' ' outside the canvas. */
 	TCHAR GetCell(const FIntPoint& Cell) const;
+
+	/** The cell's mechanism: 'P', 'T', or ' ' for none (and outside the canvas). */
+	TCHAR GetMechanism(const FIntPoint& Cell) const;
 
 	/** Paints one cell. Returns whether anything changed. */
 	bool Paint(const FIntPoint& Cell, ESokobanBrush Brush);
@@ -65,6 +74,9 @@ public:
 	/** The rows exactly as drawn, for drafts. */
 	TArray<FString> ToRows() const;
 
+	/** The mechanism rows, for drafts; empty when there are no mechanisms. */
+	TArray<FString> ToMechanismRows() const;
+
 	/** The level as drawn, playable or not (with no hero placed, none appears): for previews and test play. */
 	FSokobanLevel ToLevel(const FString& Id, const FString& Name, int32 Par) const;
 
@@ -75,7 +87,7 @@ public:
 	int32 CountCrates() const;
 	bool HasHero() const;
 
-	bool operator==(const FSokobanEditCanvas& Other) const { return Size == Other.Size && Cells == Other.Cells; }
+	bool operator==(const FSokobanEditCanvas& Other) const { return Size == Other.Size && Cells == Other.Cells && Mechanisms == Other.Mechanisms; }
 	bool operator!=(const FSokobanEditCanvas& Other) const { return !(*this == Other); }
 
 private:
@@ -85,4 +97,7 @@ private:
 
 	/** Row-major, Size.X * Size.Y characters. */
 	TArray<TCHAR> Cells;
+
+	/** Row-major like Cells: 'P', 'T' or ' '. */
+	TArray<TCHAR> Mechanisms;
 };

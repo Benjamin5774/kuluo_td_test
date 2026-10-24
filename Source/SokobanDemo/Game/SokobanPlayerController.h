@@ -17,6 +17,7 @@ class USokobanHUDWidget;
 class USokobanLevelSelectWidget;
 class USokobanMenuPanel;
 class USokobanShelfWidget;
+class USokobanTitleWidget;
 class UUserWidget;
 enum class ESokobanFlowState : uint8;
 struct FInputActionValue;
@@ -25,7 +26,7 @@ struct FInputActionValue;
  * Turns input into puzzle moves and level editor strokes, and drives the UI.
  * Moves: one cell per press and steady repeats while held. A move always plays out: a press during it is
  * kept and played the moment it lands, so steps join into one continuous walk. Undo rewinds at once, and
- * holding it rewinds faster and faster. In the editor the mouse paints (left) and erases (right), 1-6 pick a
+ * holding it rewinds faster and faster. In the editor the mouse paints (left) and erases (right), 1-8 pick a
  * brush, Z / Y undo and redo. Screens follow the game mode's flow state.
  */
 UCLASS()
@@ -79,7 +80,7 @@ public:
 
 	/**
 	 * Dev: in the editor, paints the rectangle from (X, Y) to (X2, Y2) (or just the cell when X2 < 0) with Brush
-	 * (floor, wall, crate, goal, hero or erase) after Delay seconds.
+	 * (floor, wall, crate, goal, hero, plate, trapdoor or erase) after Delay seconds.
 	 */
 	UFUNCTION(Exec)
 	void SokobanEdit(const FString& Brush, int32 X, int32 Y, int32 X2 = -1, int32 Y2 = -1, float Delay = 0.f);
@@ -87,6 +88,14 @@ public:
 	/** Dev: in the editor, paints with Brush the cell drawn at screen point (X, Y), as a click there would, after Delay seconds. */
 	UFUNCTION(Exec)
 	void SokobanEditAt(const FString& Brush, float X, float Y, float Delay = 0.f);
+
+	/** Dev: frames the title scene from Distance at Yaw and Pitch around (X, Y, Z), with Fov, after Delay seconds. */
+	UFUNCTION(Exec)
+	void SokobanTitleView(float X, float Y, float Z, float Distance, float Yaw, float Pitch, float Fov, float Delay = 0.f);
+
+	/** Dev: moves the title scene's beach (and the show on it) to (X, Y) and restarts the show, after Delay seconds. */
+	UFUNCTION(Exec)
+	void SokobanTitleBeach(float X, float Y, float Delay = 0.f);
 
 	/**
 	 * Dev: in the editor, after Delay seconds: undo, redo, wallin, check, test, save, draft, back, wider,
@@ -113,6 +122,13 @@ protected:
 
 	UPROPERTY(EditAnywhere, Category = "Sokoban|UI")
 	TSubclassOf<USokobanShelfWidget> ShelfScreenClass;
+
+	UPROPERTY(EditAnywhere, Category = "Sokoban|UI")
+	TSubclassOf<USokobanTitleWidget> TitleScreenClass;
+
+	/** Seconds of the fade from black when the view cuts between the title scene and the board. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|UI")
+	float CutFadeTime = 0.5f;
 
 	/** Seconds a direction must be held before it starts repeating (it repeats when the current move lands). */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Input")
@@ -175,7 +191,8 @@ private:
 
 	void HandleFlowStateChanged(ESokobanFlowState State);
 	void HandlePuzzleChanged();
-	void PresentMainMenu();
+	/** The title screen and its menu; with bIntro the title arrives anew. */
+	void PresentMainMenu(bool bIntro = true);
 	void PresentLevelSelect();
 	void PresentPauseMenu();
 	void PresentResults();
@@ -219,7 +236,7 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> RedoAction;
 
-	/** One per brush, in ESokobanBrush order (keys 1-6). */
+	/** One per brush, in ESokobanBrush order (keys 1-8). */
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UInputAction>> BrushActions;
 
@@ -237,6 +254,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<USokobanShelfWidget> ShelfScreen;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USokobanTitleWidget> TitleScreen;
 
 	/** Directions currently held, most recent last; the most recent one repeats. */
 	TArray<ESokobanDirection> HeldDirections;

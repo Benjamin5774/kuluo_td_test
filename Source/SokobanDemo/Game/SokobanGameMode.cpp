@@ -2,12 +2,14 @@
 
 #include "Game/SokobanGameMode.h"
 #include "SokobanDemo.h"
+#include "Game/SokobanAudioSubsystem.h"
 #include "Game/SokobanPlayerController.h"
 #include "Game/SokobanProgressSubsystem.h"
 #include "LevelEditor/SokobanLevelEditor.h"
 #include "Puzzle/SokobanEditCanvas.h"
 #include "View/SokobanBoardView.h"
 #include "View/SokobanCameraRig.h"
+#include "View/SokobanTitleStage.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
@@ -69,6 +71,7 @@ void ASokobanGameMode::StartPlay()
 
 	LevelEditor = GetWorld()->SpawnActor<ASokobanLevelEditor>(ASokobanLevelEditor::StaticClass(), FTransform::Identity, SpawnParams);
 	LevelEditor->Init(BoardView, CameraRig);
+	TitleStage = GetWorld()->SpawnActor<ASokobanTitleStage>(ASokobanTitleStage::StaticClass(), BoardView->GetActorTransform(), SpawnParams);
 
 	Super::StartPlay();
 
@@ -108,8 +111,17 @@ void ASokobanGameMode::ShowMainMenu()
 {
 	GetWorldTimerManager().ClearTimer(ResultsTimer);
 	LeaveDrawing();
-	ShowBackdrop();
+	// The title screen shows a castle of its own, seen from the beach in front of it. The level being played
+	// stays in the puzzle, to be picked up again (see ContinueGame).
+	BoardView->BuildLevel(MakeTitleCastle(), true);
+	bBoardShowsCampaign = false;
+	TitleStage->Show();
 	SetFlowState(ESokobanFlowState::MainMenu);
+}
+
+FSokobanLevel ASokobanGameMode::MakeTitleCastle()
+{
+	return FSokobanEditCanvas::MakeWalledRoom(FIntPoint(10, 6)).ToLevel(TEXT("title"), TEXT("Title"), 0);
 }
 
 void ASokobanGameMode::ShowLevelSelect()
@@ -122,11 +134,28 @@ void ASokobanGameMode::ShowLevelSelect()
 
 void ASokobanGameMode::ShowBackdrop()
 {
-	// The menus keep a game level on the board as their backdrop; after a win, show where the player will continue.
-	if (!bBoardShowsCampaign || LevelIndex == INDEX_NONE || bSolved)
+	// The menus keep a game level on the board as their backdrop: the one being played, or after a win (and
+	// coming from the title or the editor) where the player will continue.
+	if (bBoardShowsCampaign && LevelIndex != INDEX_NONE && !bSolved)
+	{
+		return;
+	}
+	if (HasUnfinishedLevel())
+	{
+		ShowUnfinishedLevel();
+	}
+	else
 	{
 		LoadLevel(GetContinueIndex());
 	}
+}
+
+void ASokobanGameMode::ShowUnfinishedLevel()
+{
+	BoardView->BuildLevel(Levels[LevelIndex]);
+	BoardView->SyncToState(Puzzle.GetState(), 0.f);
+	CameraRig->FrameBounds(BoardView->GetPlayBounds(), SceneBounds, false);
+	bBoardShowsCampaign = true;
 }
 
 void ASokobanGameMode::StartLevel(int32 Index)
@@ -143,14 +172,21 @@ void ASokobanGameMode::StartLevel(int32 Index)
 
 bool ASokobanGameMode::HasUnfinishedLevel() const
 {
-	return bBoardShowsCampaign && LevelIndex != INDEX_NONE && !bSolved && Puzzle.GetState().MoveCount > 0;
+	// Test plays and freshly loaded levels replace the puzzle, so only a game level left mid-play still holds moves.
+	return PlayContext == ESokobanPlayContext::Campaign && LevelIndex != INDEX_NONE && !bSolved && Puzzle.GetState().MoveCount > 0;
 }
 
 void ASokobanGameMode::ContinueGame()
 {
 	if (HasUnfinishedLevel())
 	{
-		// The menus kept the level on the board as it was left: carry on from there.
+		// Carry on from where the player left the level.
+		GetWorldTimerManager().ClearTimer(ResultsTimer);
+		LeaveDrawing();
+		if (!bBoardShowsCampaign)
+		{
+			ShowUnfinishedLevel();
+		}
 		SetFlowState(ESokobanFlowState::Playing);
 		return;
 	}
@@ -259,7 +295,7 @@ void ASokobanGameMode::DeleteShelfLevel(ESokobanShelf Shelf, const FString& Id)
 void ASokobanGameMode::EditShelfLevel(ESokobanShelf Shelf, const FSokobanLevelData& Data)
 {
 	// Drafts are stored exactly as drawn; saved levels are proper level files.
-	FSokobanEditCanvas Canvas = FSokobanEditCanvas::FromRows(Data.Map);
+	FSokobanEditCanvas Canvas = FSokobanEditCanvas::FromRows(Data.Map, Data.Mechanisms);
 	if (Shelf == ESokobanShelf::Saved)
 	{
 		FSokobanLevel Level;
@@ -383,6 +419,14 @@ void ASokobanGameMode::LoadLevel(int32 Index)
 
 void ASokobanGameMode::SetFlowState(ESokobanFlowState NewState)
 {
+	if (NewState != ESokobanFlowState::MainMenu && TitleStage && TitleStage->IsShown())
+	{
+		TitleStage->Hide();
+	}
+	if (USokobanAudioSubsystem* Audio = USokobanAudioSubsystem::Get(this))
+	{
+		Audio->SetMusic(NewState == ESokobanFlowState::MainMenu ? ESokobanMusic::Title : ESokobanMusic::Game);
+	}
 	FlowState = NewState;
 	OnFlowStateChanged.Broadcast(NewState);
 }
@@ -397,6 +441,7 @@ FSokobanMoveResult ASokobanGameMode::RequestMove(ESokobanDirection Direction)
 
 	const FSokobanMoveResult Result = Puzzle.Move(Direction);
 	LastAnimationTime = BoardView->PlayMove(Result, Puzzle.GetState());
+	USokobanAudioSubsystem* Audio = USokobanAudioSubsystem::Get(this);
 	if (Result.Outcome == ESokobanMoveOutcome::Pushed)
 	{
 		// A thud only when the push sets crates down on goals; the more at once, the harder.
@@ -409,6 +454,25 @@ FSokobanMoveResult ASokobanGameMode::RequestMove(ESokobanDirection Direction)
 		{
 			CameraRig->Jolt(FMath::Min(0.7f + 0.3f * (Landed - 1), 1.3f), LastAnimationTime);
 		}
+		if (Audio)
+		{
+			// The scrape grows heavier with the length of the row; a chime as crates settle on goals.
+			Audio->Play(ESokobanSound::Push, FMath::Min(0.6f + 0.1f * Result.Row.Num(), 1.f), 1.f - 0.04f * (Result.Row.Num() - 1));
+			if (Landed > 0)
+			{
+				Audio->Play(ESokobanSound::Goal, 0.85f, 1.f + 0.06f * (Landed - 1), LastAnimationTime);
+			}
+		}
+	}
+	else if (Audio && Result.Outcome == ESokobanMoveOutcome::Walked)
+	{
+		// Two soft footfalls per cell, the second a shade quieter.
+		Audio->Play(ESokobanSound::Step, 0.5f, 1.f, LastAnimationTime * 0.3f);
+		Audio->Play(ESokobanSound::Step, 0.38f, 0.93f, LastAnimationTime * 0.8f);
+	}
+	else if (Audio)
+	{
+		Audio->Play(ESokobanSound::Bump, 0.45f);
 	}
 	if (Result.DidMove())
 	{
@@ -443,6 +507,10 @@ bool ASokobanGameMode::RequestUndo()
 
 	BoardView->SyncToState(Puzzle.GetState(), UndoGlideTime);
 	LastAnimationTime = UndoGlideTime;
+	if (USokobanAudioSubsystem* Audio = USokobanAudioSubsystem::Get(this))
+	{
+		Audio->Play(ESokobanSound::Undo, 0.5f);
+	}
 	OnPuzzleChanged.Broadcast();
 	return true;
 }
@@ -456,6 +524,10 @@ bool ASokobanGameMode::RequestRestart()
 
 	BoardView->SyncToState(Puzzle.GetState(), RestartGlideTime);
 	LastAnimationTime = RestartGlideTime;
+	if (USokobanAudioSubsystem* Audio = USokobanAudioSubsystem::Get(this))
+	{
+		Audio->Play(ESokobanSound::Undo, 0.7f, 0.75f);
+	}
 	OnPuzzleChanged.Broadcast();
 	return true;
 }
@@ -489,6 +561,10 @@ void ASokobanGameMode::HandleLevelSolved()
 	GetWorldTimerManager().SetTimer(ResultsTimer, FTimerDelegate::CreateWeakLambda(this, [this]()
 	{
 		BoardView->PlayVictory();
+		if (USokobanAudioSubsystem* Audio = USokobanAudioSubsystem::Get(this))
+		{
+			Audio->Play(ESokobanSound::Win, 0.9f);
+		}
 		GetWorldTimerManager().SetTimer(ResultsTimer, FTimerDelegate::CreateWeakLambda(this, [this]()
 		{
 			SetFlowState(ESokobanFlowState::LevelComplete);

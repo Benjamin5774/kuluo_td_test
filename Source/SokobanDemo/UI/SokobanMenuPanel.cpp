@@ -1,6 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "UI/SokobanMenuPanel.h"
+#include "Game/SokobanAudioSubsystem.h"
 #include "Puzzle/SokobanRules.h"
 #include "UI/SokobanButton.h"
 #include "UI/SokobanUIStyle.h"
@@ -176,6 +177,7 @@ bool USokobanMenuPanel::ActivateButton(int32 Index)
 void USokobanMenuPanel::ShowStars(int32 Earned)
 {
 	StarsEarned = FMath::Clamp(Earned, 0, StarImages.Num());
+	StarsChimed = 0;
 	StarClock = 0.f;
 	StarRow->SetVisibility(ESlateVisibility::HitTestInvisible);
 	AnimateStars();
@@ -216,7 +218,15 @@ void USokobanMenuPanel::AnimateStars()
 			continue;
 		}
 
-		// Landed: squashed small by the impact, it springs back through a slight overshoot...
+		// Landed (each one chiming a step higher): squashed small by the impact, it springs back through a slight overshoot...
+		if (Index >= StarsChimed)
+		{
+			StarsChimed = Index + 1;
+			if (USokobanAudioSubsystem* Audio = USokobanAudioSubsystem::Get(this))
+			{
+				Audio->Play(ESokobanSound::Star, 0.75f, 1.f + 0.125f * Index);
+			}
+		}
 		const float Settle = FMath::Min(SinceLanding / SettleTime, 1.f);
 		Star->SetRenderScale(FVector2D(1.f - 0.2f * FMath::Cos(Settle * 2.5f * PI) * FMath::Square(1.f - Settle)));
 		Star->SetRenderTransformAngle(0.f);

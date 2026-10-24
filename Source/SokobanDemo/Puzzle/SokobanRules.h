@@ -52,6 +52,18 @@ struct SOKOBANDEMO_API FSokobanRules
 	/** True when every goal holds a crate. */
 	static bool IsSolved(const FSokobanLayout& Layout, const FSokobanBoardState& State);
 
+	/** Whether a crate or a hero holds down every pressure plate (false when there are none). */
+	static bool ArePlatesHeld(const FSokobanLayout& Layout, const FSokobanBoardState& State);
+
+	/**
+	 * Whether the trapdoor at Cell is open: while every plate is held, and for as long as something stands on it
+	 * (it can't close on a crate or a hero).
+	 */
+	static bool IsTrapdoorOpen(const FSokobanLayout& Layout, const FSokobanBoardState& State, const FIntPoint& Cell);
+
+	/** Whether a hero or a crate may move into Cell, as far as the terrain goes: floor, and no closed trapdoor. */
+	static bool CanEnter(const FSokobanLayout& Layout, const FSokobanBoardState& State, const FIntPoint& Cell);
+
 	/** Most stars a solve can earn. */
 	static constexpr int32 MaxStars = 3;
 

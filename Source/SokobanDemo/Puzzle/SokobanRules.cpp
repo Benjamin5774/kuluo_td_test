@@ -18,9 +18,10 @@ FSokobanMoveResult FSokobanRules::TryMove(const FSokobanLayout& Layout, FSokoban
 	Result.From = Hero.Cell;
 	Result.To = Hero.Cell;
 
+	// Trapdoors are judged as they stand before the move: one opens only once its plates are already held.
 	const FIntPoint Step = SokobanGrid::Offset(Direction);
 	const FIntPoint Target = Hero.Cell + Step;
-	if (!Layout.IsFloor(Target) || State.FindHeroAt(Target) != INDEX_NONE)
+	if (!CanEnter(Layout, State, Target) || State.FindHeroAt(Target) != INDEX_NONE)
 	{
 		Result.Outcome = ESokobanMoveOutcome::Blocked;
 		return Result;
@@ -43,7 +44,7 @@ FSokobanMoveResult FSokobanRules::TryMove(const FSokobanLayout& Layout, FSokoban
 		}
 
 		// Cell is now the first cell past the row; the whole row moves only if it is free floor.
-		if (!Layout.IsFloor(Cell) || State.FindHeroAt(Cell) != INDEX_NONE)
+		if (!CanEnter(Layout, State, Cell) || State.FindHeroAt(Cell) != INDEX_NONE)
 		{
 			Result.Outcome = ESokobanMoveOutcome::Blocked;
 			return Result;
@@ -81,6 +82,33 @@ bool FSokobanRules::IsSolved(const FSokobanLayout& Layout, const FSokobanBoardSt
 		}
 	}
 	return true;
+}
+
+bool FSokobanRules::ArePlatesHeld(const FSokobanLayout& Layout, const FSokobanBoardState& State)
+{
+	if (Layout.Plates.Num() == 0)
+	{
+		return false;
+	}
+
+	for (const FIntPoint& Plate : Layout.Plates)
+	{
+		if (State.FindCrateAt(Plate) == INDEX_NONE && State.FindHeroAt(Plate) == INDEX_NONE)
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+bool FSokobanRules::IsTrapdoorOpen(const FSokobanLayout& Layout, const FSokobanBoardState& State, const FIntPoint& Cell)
+{
+	return ArePlatesHeld(Layout, State) || State.FindCrateAt(Cell) != INDEX_NONE || State.FindHeroAt(Cell) != INDEX_NONE;
+}
+
+bool FSokobanRules::CanEnter(const FSokobanLayout& Layout, const FSokobanBoardState& State, const FIntPoint& Cell)
+{
+	return Layout.IsFloor(Cell) && (!Layout.IsTrapdoor(Cell) || IsTrapdoorOpen(Layout, State, Cell));
 }
 
 int32 FSokobanRules::StarsForSolve(int32 Moves, int32 Par)

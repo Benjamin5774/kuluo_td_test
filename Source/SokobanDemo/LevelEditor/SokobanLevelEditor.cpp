@@ -2,6 +2,7 @@
 
 #include "LevelEditor/SokobanLevelEditor.h"
 #include "SokobanDemo.h"
+#include "Game/SokobanAudioSubsystem.h"
 #include "LevelEditor/SokobanLevelShelf.h"
 #include "View/SokobanBoardView.h"
 #include "View/SokobanCameraRig.h"
@@ -103,6 +104,11 @@ void ASokobanLevelEditor::Tick(float DeltaSeconds)
 		LastStrokeCell = Hovered;
 		if (Canvas.Paint(Hovered.GetValue(), bStrokeErase ? ESokobanBrush::Erase : Brush))
 		{
+			// A soft tick per painted cell, lower when erasing.
+			if (USokobanAudioSubsystem* Audio = USokobanAudioSubsystem::Get(this))
+			{
+				Audio->Play(ESokobanSound::Click, 0.3f, bStrokeErase ? 0.8f : 1.15f);
+			}
 			Changed(false);
 		}
 	}
@@ -397,6 +403,7 @@ bool ASokobanLevelEditor::StoreDraft()
 	Data.Id = LevelId;
 	Data.Name = LevelName;
 	Data.Map = Canvas.ToRows();
+	Data.Mechanisms = Canvas.ToMechanismRows();
 	FString Error;
 	if (!SokobanShelf::Store(SokobanShelf::GetDir(ESokobanShelf::Drafts), Data, Error))
 	{
@@ -460,6 +467,8 @@ FText ASokobanLevelEditor::DescribeIssue(ESokobanCanvasIssue Issue, const FSokob
 		return LOCTEXT("NoHero", "还没有放大橘（笔刷 5）");
 	case ESokobanCanvasIssue::NoGoal:
 		return LOCTEXT("NoGoal", "还没有目标点（笔刷 4）");
+	case ESokobanCanvasIssue::TrapdoorWithoutPlate:
+		return LOCTEXT("NoPlate", "有活板门但还没有机关（笔刷 6）");
 	case ESokobanCanvasIssue::TooFewCrates:
 		return FText::Format(LOCTEXT("TooFewCrates", "目标点比箱子多：{0} 个目标点，{1} 个箱子"), Canvas.CountGoals(), Canvas.CountCrates());
 	default:

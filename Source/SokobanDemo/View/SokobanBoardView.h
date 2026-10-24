@@ -36,9 +36,9 @@ struct FSokobanDressing
 };
 
 /**
- * Draws a level from its layout: the castle (courtyard, walls, towers, goal plates), the rock it stands on with
- * the shallows around it, and the plants that grow on them; and animates the pieces. It only mirrors the puzzle
- * state; all rules live in the Puzzle layer.
+ * Draws a level from its layout: the castle (courtyard, walls, towers, goal plates, pressure plates and trapdoors),
+ * the rock it stands on with the shallows around it, and the plants that grow on them; and animates the pieces and
+ * mechanisms. It only mirrors the puzzle state; all rules live in the Puzzle layer.
  *
  * The scenery around the castle (the sea, islets, trees) is not generated here: it is placed by hand in the map
  * (Outliner folder "Scenery") and stays the same for every level. The sea sits 60 cm below the floor.
@@ -51,8 +51,13 @@ class SOKOBANDEMO_API ASokobanBoardView : public AActor
 public:
 	ASokobanBoardView();
 
-	/** Rebuilds terrain, scenery and pieces for a freshly loaded level. */
-	void BuildLevel(const FSokobanLevel& Level);
+	virtual void Tick(float DeltaSeconds) override;
+
+	/**
+	 * Rebuilds terrain, scenery and pieces for a freshly loaded level. As a showcase (the title screen's castle, seen
+	 * from the front) every outer wall stands tall and each corner gets a tower.
+	 */
+	void BuildLevel(const FSokobanLevel& Level, bool bInShowcase = false);
 
 	/** Animates a move the puzzle has just applied. Returns the seconds from now until it lands. */
 	float PlayMove(const FSokobanMoveResult& Move, const FSokobanBoardState& NewState);
@@ -194,6 +199,36 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
 	float GoalPressDepth = 1.5f;
 
+	/** Steel pressure plate on every mechanism plate; its material reads per-instance custom data 0, 1 while held down. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Mechanisms")
+	TObjectPtr<UMaterialInterface> SwitchPlateMaterial;
+
+	/** The two wooden leaves of a trapdoor, the iron bands across them, and the pit under them. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Mechanisms")
+	TObjectPtr<UMaterialInterface> TrapdoorWoodMaterial;
+
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Mechanisms")
+	TObjectPtr<UMaterialInterface> TrapdoorMetalMaterial;
+
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Mechanisms")
+	TObjectPtr<UMaterialInterface> TrapdoorPitMaterial;
+
+	/** The rune inlaid in each leaf, lit while the trapdoor is open (per-instance custom data 0). */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Mechanisms")
+	TObjectPtr<UMaterialInterface> TrapdoorRuneMaterial;
+
+	/** How far the leaves of a closed trapdoor stand up from lying flat, in degrees. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Mechanisms")
+	float TrapdoorRaisedAngle = 96.f;
+
+	/** Seconds for the leaves to swing between raised and flat. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Mechanisms")
+	float TrapdoorSwingTime = 0.32f;
+
+	/** How far a pressure plate sinks while held down. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Mechanisms")
+	float PlatePressDepth = 2.5f;
+
 	/** How far the walls inside the courtyard rise above the floor. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
 	float WallHeight = 50.f;
@@ -316,6 +351,20 @@ private:
 
 	FTransform GoalPlateTransform(const FIntPoint& Cell, bool bPressed) const;
 
+	/**
+	 * Shows State's pressure plates and trapdoors At (world seconds), when the move leading to it lands; a state
+	 * still waiting from an earlier move is shown first. Instant when At is not in the future.
+	 */
+	void ScheduleMechanisms(const FSokobanBoardState& State, double At);
+
+	/** Presses the held plates and swings each trapdoor towards open or closed (at once when bInstant). */
+	void ShowMechanisms(const FSokobanBoardState& State, bool bInstant);
+
+	/** Poses trapdoor Index with its leaves Raise of the way up (0 flat and open, 1 raised and closed). */
+	void PoseTrapdoor(int32 Index, float Raise);
+
+	FTransform SwitchPlateTransform(const FIntPoint& Cell, bool bPressed) const;
+
 	/** Body of the island under every non-void cell, reaching down into the sea. */
 	UPROPERTY(VisibleAnywhere, Category = "Sokoban")
 	TObjectPtr<UInstancedStaticMeshComponent> IslandTiles;
@@ -348,6 +397,26 @@ private:
 	UPROPERTY(VisibleAnywhere, Category = "Sokoban")
 	TObjectPtr<UInstancedStaticMeshComponent> ShelfTiles;
 
+	/** Pressure plates and the stone frames they sit in. */
+	UPROPERTY(VisibleAnywhere, Category = "Sokoban|Mechanisms")
+	TObjectPtr<UInstancedStaticMeshComponent> SwitchSockets;
+
+	UPROPERTY(VisibleAnywhere, Category = "Sokoban|Mechanisms")
+	TObjectPtr<UInstancedStaticMeshComponent> SwitchPlates;
+
+	/** Trapdoors: the dark floor of each pit, two leaves per trapdoor, two iron bands per leaf, a rune per leaf. */
+	UPROPERTY(VisibleAnywhere, Category = "Sokoban|Mechanisms")
+	TObjectPtr<UInstancedStaticMeshComponent> TrapdoorPits;
+
+	UPROPERTY(VisibleAnywhere, Category = "Sokoban|Mechanisms")
+	TObjectPtr<UInstancedStaticMeshComponent> TrapdoorLeaves;
+
+	UPROPERTY(VisibleAnywhere, Category = "Sokoban|Mechanisms")
+	TObjectPtr<UInstancedStaticMeshComponent> TrapdoorBands;
+
+	UPROPERTY(VisibleAnywhere, Category = "Sokoban|Mechanisms")
+	TObjectPtr<UInstancedStaticMeshComponent> TrapdoorRunes;
+
 	/** Level editor overlay (see SetCanvasOverlay and SetCanvasCursor). */
 	UPROPERTY(VisibleAnywhere, Category = "Sokoban|Editor")
 	TObjectPtr<UInstancedStaticMeshComponent> CanvasCells;
@@ -356,6 +425,9 @@ private:
 	TObjectPtr<UStaticMeshComponent> CanvasCursor;
 
 	bool bCanvasOverlay = false;
+
+	/** Building the title screen's castle (see BuildLevel). */
+	bool bShowcase = false;
 
 	/** Editor-only stand-ins for the pieces in the preview. */
 	UPROPERTY(VisibleAnywhere, Category = "Sokoban|Preview")
@@ -377,6 +449,21 @@ private:
 
 	/** The goal under each instance of GoalMarkers, in instance order. */
 	TArray<FIntPoint> GoalCells;
+
+	/** A trapdoor's leaves swinging from one pose to another (see PoseTrapdoor). */
+	struct FTrapdoorSwing
+	{
+		float From = 1.f;
+		float To = 1.f;
+		double StartTime = -1.0;
+	};
+
+	/** Per trapdoor, in Layout.Trapdoors order. */
+	TArray<FTrapdoorSwing> TrapdoorSwings;
+
+	/** The board state ScheduleMechanisms is waiting to show, and when. */
+	TOptional<FSokobanBoardState> PendingMechanisms;
+	double PendingMechanismsTime = 0.0;
 
 	/** Direction of the push the hero made last, while its pushes follow one another; unset otherwise. */
 	TOptional<ESokobanDirection> PushingDirection;

@@ -76,6 +76,9 @@ private:
 
 	int32 StarsEarned = 0;
 
+	/** How many stars have landed with their chime so far. */
+	int32 StarsChimed = 0;
+
 	/** Seconds since ShowStars; negative when no reveal is running. */
 	float StarClock = -1.f;
 

@@ -17,8 +17,9 @@ CC0 不要求署名，这里仍然列出以示感谢。
 
 - 主角：见上文"角色与动画"。
 - 评分星星：`Content/Sokoban/UI` 下的 T_StarFull、T_StarEmpty、T_StarGlow，由脚本绘制。
-- 材质：`Content/Sokoban/Materials` 下的 M_SokobanCharacter、M_SokobanProp、M_SokobanFoliage、M_SokobanTerrain、M_SokobanWater、M_SokobanGoalPlate、M_SokobanToon（卡通后期）、M_SokobanCloudShadows（云影灯光函数）。
+- 材质：`Content/Sokoban/Materials` 下的 M_SokobanCharacter、M_SokobanProp、M_SokobanFoliage、M_SokobanTerrain、M_SokobanWater、M_SokobanGoalPlate、M_SokobanSwitchPlate（机关压板）、M_SokobanGlowInlay（活板门符文）、M_SokobanToon（卡通后期）、M_SokobanCloudShadows（云影灯光函数）。
 - 水面波纹法线贴图 T_WaterRipples_N：由脚本按正弦波叠加生成。
+- 音乐与音效：`Content/Sokoban/Audio` 下的全部声音（标题曲、关卡曲、海浪环境声和 13 个音效）由脚本合成：拨弦用 Karplus-Strong 物理模型，马林巴、拇指琴、钟和木头敲击用模态合成，海浪、摩擦和吱呀声用整形噪声，再加人性化的节奏力度和卷积混响。曲子是为本作写的。
 
 ## 引擎自带内容
 

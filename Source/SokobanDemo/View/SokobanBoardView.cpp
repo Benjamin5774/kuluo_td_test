@@ -2,6 +2,7 @@
 
 #include "View/SokobanBoardView.h"
 #include "SokobanDemo.h"
+#include "Game/SokobanAudioSubsystem.h"
 #include "Puzzle/SokobanGrid.h"
 #include "View/SokobanCrate.h"
 #include "View/SokobanHero.h"
@@ -36,11 +37,36 @@ namespace
 		Dressing.bTall = bTall;
 		return Dressing;
 	}
+
+	/** A trapdoor's leaf, in cells: from its hinge to its free edge, along the hinge, and thick. */
+	constexpr float LeafWidth = 0.46f;
+	constexpr float LeafLength = 0.9f;
+	constexpr float LeafThickness = 0.05f;
+
+	/**
+	 * How far up a trapdoor's leaves are Alpha (0 to 1) of the way through a swing from From to To. Falling flat they
+	 * gather speed like a dropped board and bounce once as they land; raised, they are hauled up and slow to a stop.
+	 */
+	float SwingRaise(float From, float To, float Alpha)
+	{
+		if (To < From)
+		{
+			constexpr float Land = 0.72f;
+			if (Alpha < Land)
+			{
+				return FMath::Lerp(From, To, FMath::Square(Alpha / Land));
+			}
+			return To + (From - To) * 0.07f * FMath::Sin((Alpha - Land) / (1.f - Land) * UE_PI);
+		}
+		return FMath::Lerp(From, To, 1.f - FMath::Cube(1.f - Alpha));
+	}
 }
 
 ASokobanBoardView::ASokobanBoardView()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	// Ticks only while a trapdoor swings or a move's mechanisms wait for it to land.
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderMesh(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
@@ -50,6 +76,11 @@ ASokobanBoardView::ASokobanBoardView()
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> GoalSocketAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_GoalSocket.MI_GoalSocket"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> CastleWallAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_CastleWall.MI_CastleWall"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MortarAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_Mortar.MI_Mortar"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> SwitchPlateAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_SwitchPlate.MI_SwitchPlate"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> TrapdoorWoodAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_TrapdoorWood.MI_TrapdoorWood"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MetalAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_Metal.MI_Metal"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> TrapdoorPitAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_TrapdoorPit.MI_TrapdoorPit"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> TrapdoorRuneAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_TrapdoorRune.MI_TrapdoorRune"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> CanvasGridAsset(TEXT("/Game/Sokoban/UI/MI_EditorGrid.MI_EditorGrid"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> CanvasCursorAsset(TEXT("/Game/Sokoban/UI/MI_EditorCursor.MI_EditorCursor"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> CanvasEraseAsset(TEXT("/Game/Sokoban/UI/MI_EditorCursorErase.MI_EditorCursorErase"));
@@ -62,6 +93,11 @@ ASokobanBoardView::ASokobanBoardView()
 	GoalSocketMaterial = GoalSocketAsset.Object;
 	CastleWallMaterial = CastleWallAsset.Object;
 	MortarMaterial = MortarAsset.Object;
+	SwitchPlateMaterial = SwitchPlateAsset.Object;
+	TrapdoorWoodMaterial = TrapdoorWoodAsset.Object;
+	TrapdoorMetalMaterial = MetalAsset.Object;
+	TrapdoorPitMaterial = TrapdoorPitAsset.Object;
+	TrapdoorRuneMaterial = TrapdoorRuneAsset.Object;
 	// Courtyard tiles and tower roofs from the Quaternius Medieval Village MegaKit (CC0).
 	FloorMesh = FindEnvironmentMesh(TEXT("Floor_Brick"));
 	TowerRoofMesh = FindEnvironmentMesh(TEXT("Roof_Tower_RoundTiles"));
@@ -79,6 +115,16 @@ ASokobanBoardView::ASokobanBoardView()
 	// Custom data 0: how pressed each plate is (the plate material glows with it).
 	GoalMarkers->NumCustomDataFloats = 1;
 	ShelfTiles = CreateLayer(TEXT("ShelfTiles"), CubeMesh.Object);
+	SwitchSockets = CreateLayer(TEXT("SwitchSockets"), CubeMesh.Object);
+	SwitchPlates = CreateLayer(TEXT("SwitchPlates"), CubeMesh.Object);
+	// Custom data 0: 1 while the plate is held down (it glows brighter), as on GoalMarkers.
+	SwitchPlates->NumCustomDataFloats = 1;
+	TrapdoorPits = CreateLayer(TEXT("TrapdoorPits"), CubeMesh.Object);
+	TrapdoorLeaves = CreateLayer(TEXT("TrapdoorLeaves"), CubeMesh.Object);
+	TrapdoorBands = CreateLayer(TEXT("TrapdoorBands"), CubeMesh.Object);
+	TrapdoorRunes = CreateLayer(TEXT("TrapdoorRunes"), CubeMesh.Object);
+	// Custom data 0: 1 while the trapdoor is open (the runes light up).
+	TrapdoorRunes->NumCustomDataFloats = 1;
 
 	// The level editor's overlay: plates over empty cells and a highlight on the hovered one.
 	CanvasCells = CreateLayer(TEXT("CanvasCells"), CubeMesh.Object);
@@ -179,10 +225,11 @@ void ASokobanBoardView::BeginPlay()
 	ClearEditorPreview();
 }
 
-void ASokobanBoardView::BuildLevel(const FSokobanLevel& Level)
+void ASokobanBoardView::BuildLevel(const FSokobanLevel& Level, bool bInShowcase)
 {
 	ClearPieces();
 	PushingDirection.Reset();
+	bShowcase = bInShowcase;
 	BuildTerrain(Level);
 
 	FActorSpawnParameters SpawnParams;
@@ -205,6 +252,7 @@ void ASokobanBoardView::BuildLevel(const FSokobanLevel& Level)
 		}
 	}
 	UpdateCrateHighlights(Level.InitialState, true);
+	ShowMechanisms(Level.InitialState, true);
 }
 
 void ASokobanBoardView::ClearTerrain()
@@ -220,6 +268,14 @@ void ASokobanBoardView::ClearTerrain()
 	GoalMarkers->ClearInstances();
 	GoalCells.Reset();
 	ShelfTiles->ClearInstances();
+	SwitchSockets->ClearInstances();
+	SwitchPlates->ClearInstances();
+	TrapdoorPits->ClearInstances();
+	TrapdoorLeaves->ClearInstances();
+	TrapdoorBands->ClearInstances();
+	TrapdoorRunes->ClearInstances();
+	TrapdoorSwings.Reset();
+	PendingMechanisms.Reset();
 	CanvasCells->ClearInstances();
 	for (const TPair<TObjectPtr<UStaticMesh>, TObjectPtr<UInstancedStaticMeshComponent>>& Layer : DressingLayers)
 	{
@@ -246,6 +302,12 @@ void ASokobanBoardView::BuildTerrain(const FSokobanLevel& Level)
 	ShelfTiles->SetMaterial(0, ShelfMaterial);
 	GoalSockets->SetMaterial(0, GoalSocketMaterial);
 	GoalMarkers->SetMaterial(0, GoalPlateMaterial);
+	SwitchSockets->SetMaterial(0, GoalSocketMaterial);
+	SwitchPlates->SetMaterial(0, SwitchPlateMaterial);
+	TrapdoorPits->SetMaterial(0, TrapdoorPitMaterial);
+	TrapdoorLeaves->SetMaterial(0, TrapdoorWoodMaterial);
+	TrapdoorBands->SetMaterial(0, TrapdoorMetalMaterial);
+	TrapdoorRunes->SetMaterial(0, TrapdoorRuneMaterial);
 	FloorTiles->SetStaticMesh(FloorMesh);
 	// The tile keeps its own material (maps saved by older builds carry a flat-colour override here).
 	FloorTiles->EmptyOverrideMaterials();
@@ -284,7 +346,11 @@ void ASokobanBoardView::BuildTerrain(const FSokobanLevel& Level)
 				continue;
 			}
 
-			IslandTiles->AddInstance(FTransform(FRotator::ZeroRotator, Center + FVector(0.f, 0.f, IslandZ), IslandScale), true);
+			// Under a trapdoor the island is dug out: its neighbours' rock makes the walls of the pit.
+			if (!Layout.IsTrapdoor(Cell))
+			{
+				IslandTiles->AddInstance(FTransform(FRotator::ZeroRotator, Center + FVector(0.f, 0.f, IslandZ), IslandScale), true);
+			}
 
 			// A grassy rim along the coast, so the floor sits inside the island instead of at its very edge.
 			for (ESokobanDirection Direction : SokobanGrid::AllDirections)
@@ -339,8 +405,8 @@ void ASokobanBoardView::BuildTerrain(const FSokobanLevel& Level)
 					}
 				}
 
-				// A round tower on each back corner, roofed.
-				const bool bBackCorner = IsVoid(Cell + SokobanGrid::Offset(ESokobanDirection::North))
+				// A round tower on each back corner (each corner of a showcase), roofed.
+				const bool bBackCorner = (IsVoid(Cell + SokobanGrid::Offset(ESokobanDirection::North)) || (bShowcase && IsVoid(Cell + SokobanGrid::Offset(ESokobanDirection::South))))
 					&& (IsVoid(Cell + SokobanGrid::Offset(ESokobanDirection::West)) || IsVoid(Cell + SokobanGrid::Offset(ESokobanDirection::East)));
 				if (bBackCorner)
 				{
@@ -349,6 +415,12 @@ void ASokobanBoardView::BuildTerrain(const FSokobanLevel& Level)
 					TowerRoofs->AddInstance(FTransform(FRotator(0.f, Random.FRandRange(0.f, 360.f), 0.f),
 						Center + FVector(0.f, 0.f, TowerHeight - 8.f - Roof.Min.Z * RoofScale), FVector(RoofScale)), true);
 				}
+				continue;
+			}
+
+			if (Layout.IsTrapdoor(Cell))
+			{
+				// Laid out with the other trapdoors below, in their own order.
 				continue;
 			}
 
@@ -366,6 +438,28 @@ void ASokobanBoardView::BuildTerrain(const FSokobanLevel& Level)
 				GoalCells.Add(Cell);
 			}
 		}
+	}
+
+	// Pressure plates: a steel plate in a stone frame; instance N is plate N of the layout.
+	for (const FIntPoint& Cell : Layout.Plates)
+	{
+		SwitchSockets->AddInstance(FTransform(FRotator::ZeroRotator, CellToWorld(Cell) + FVector(0.f, 0.f, 0.5f * Unit), FVector(0.8f * Unit, 0.8f * Unit, 0.03f * Unit)), true);
+		SwitchPlates->AddInstance(SwitchPlateTransform(Cell, false), true);
+	}
+
+	// Trapdoors: a dark floor deep in the pit, then two leaves (with two bands and a rune each), posed closed for now.
+	for (int32 Index = 0; Index < Layout.Trapdoors.Num(); ++Index)
+	{
+		TrapdoorPits->AddInstance(FTransform(FRotator::ZeroRotator, CellToWorld(Layout.Trapdoors[Index]) + FVector(0.f, 0.f, -50.f * Unit), FVector(Unit, Unit, 0.1f * Unit)), true);
+		for (int32 Leaf = 0; Leaf < 2; ++Leaf)
+		{
+			TrapdoorLeaves->AddInstance(FTransform::Identity, true);
+			TrapdoorBands->AddInstance(FTransform::Identity, true);
+			TrapdoorBands->AddInstance(FTransform::Identity, true);
+			TrapdoorRunes->AddInstance(FTransform::Identity, true);
+		}
+		TrapdoorSwings.AddDefaulted();
+		PoseTrapdoor(Index, 1.f);
 	}
 
 	BuildDressing(Level);
@@ -465,6 +559,10 @@ bool ASokobanBoardView::IsOuterWall(const FIntPoint& Cell) const
 
 bool ASokobanBoardView::IsFrontWall(const FIntPoint& Cell) const
 {
+	if (bShowcase)
+	{
+		return false;
+	}
 	const FIntPoint North = Cell + SokobanGrid::Offset(ESokobanDirection::North);
 	const FIntPoint South = Cell + SokobanGrid::Offset(ESokobanDirection::South);
 	// Directly in front of the courtyard, or a front corner (open to the south, courtyard diagonally behind).
@@ -671,8 +769,10 @@ void ASokobanBoardView::BuildEditorPreview()
 
 	const FSokobanLevel& Level = Levels[PreviewLevelIndex];
 	PreviewLevelName = FString::Printf(TEXT("%d/%d %s"), PreviewLevelIndex + 1, Levels.Num(), *Level.Name);
+	bShowcase = false;
 	BuildTerrain(Level);
 	PressGoalPlates(Level.InitialState);
+	ShowMechanisms(Level.InitialState, true);
 
 	// Stand-ins look like the real pieces: same meshes and offsets, taken from the piece classes' defaults.
 	if (const ASokobanCrate* Crate = CrateClass ? CrateClass->GetDefaultObject<ASokobanCrate>() : nullptr)
@@ -796,6 +896,7 @@ float ASokobanBoardView::PlayMove(const FSokobanMoveResult& Move, const FSokoban
 		return BumpDuration;
 	}
 
+	ScheduleMechanisms(NewState, Glide.StartTime + Glide.Duration);
 	return static_cast<float>(Glide.StartTime + Glide.Duration - Now);
 }
 
@@ -834,6 +935,14 @@ void ASokobanBoardView::SyncToState(const FSokobanBoardState& State, float Durat
 		}
 	}
 	UpdateCrateHighlights(State, bInstant);
+	if (bInstant)
+	{
+		ShowMechanisms(State, true);
+	}
+	else
+	{
+		ScheduleMechanisms(State, GetWorld()->GetTimeSeconds() + Duration);
+	}
 }
 
 void ASokobanBoardView::FinishAnimations()
@@ -934,6 +1043,161 @@ void ASokobanBoardView::PressGoalPlates(const FSokobanBoardState& State)
 		GoalMarkers->UpdateInstanceTransform(Index, GoalPlateTransform(GoalCells[Index], bPressed), true);
 	}
 	GoalMarkers->MarkRenderStateDirty();
+}
+
+void ASokobanBoardView::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	const double Now = GetWorld()->GetTimeSeconds();
+	if (PendingMechanisms.IsSet() && Now >= PendingMechanismsTime)
+	{
+		const FSokobanBoardState State = PendingMechanisms.GetValue();
+		PendingMechanisms.Reset();
+		ShowMechanisms(State, false);
+	}
+
+	bool bPosed = false;
+	bool bSwinging = false;
+	for (int32 Index = 0; Index < TrapdoorSwings.Num(); ++Index)
+	{
+		FTrapdoorSwing& Swing = TrapdoorSwings[Index];
+		if (Swing.StartTime < 0.0)
+		{
+			continue;
+		}
+		const float Alpha = FMath::Clamp(static_cast<float>((Now - Swing.StartTime) / TrapdoorSwingTime), 0.f, 1.f);
+		PoseTrapdoor(Index, SwingRaise(Swing.From, Swing.To, Alpha));
+		bPosed = true;
+		if (Alpha >= 1.f)
+		{
+			Swing.From = Swing.To;
+			Swing.StartTime = -1.0;
+		}
+		else
+		{
+			bSwinging = true;
+		}
+	}
+	if (bPosed)
+	{
+		TrapdoorLeaves->MarkRenderStateDirty();
+		TrapdoorBands->MarkRenderStateDirty();
+		TrapdoorRunes->MarkRenderStateDirty();
+	}
+	if (!bSwinging && !PendingMechanisms.IsSet())
+	{
+		SetActorTickEnabled(false);
+	}
+}
+
+void ASokobanBoardView::ScheduleMechanisms(const FSokobanBoardState& State, double At)
+{
+	if (Layout.Plates.Num() == 0 && Layout.Trapdoors.Num() == 0)
+	{
+		return;
+	}
+	if (PendingMechanisms.IsSet())
+	{
+		const FSokobanBoardState Earlier = PendingMechanisms.GetValue();
+		PendingMechanisms.Reset();
+		ShowMechanisms(Earlier, false);
+	}
+	if (At <= GetWorld()->GetTimeSeconds())
+	{
+		ShowMechanisms(State, false);
+		return;
+	}
+	PendingMechanisms = State;
+	PendingMechanismsTime = At;
+	SetActorTickEnabled(true);
+}
+
+void ASokobanBoardView::ShowMechanisms(const FSokobanBoardState& State, bool bInstant)
+{
+	USokobanAudioSubsystem* Audio = bInstant ? nullptr : USokobanAudioSubsystem::Get(this);
+	for (int32 Index = 0; Index < Layout.Plates.Num(); ++Index)
+	{
+		const FIntPoint& Cell = Layout.Plates[Index];
+		const bool bHeld = State.FindCrateAt(Cell) != INDEX_NONE || State.FindHeroAt(Cell) != INDEX_NONE;
+		const bool bWasHeld = SwitchPlates->PerInstanceSMCustomData.IsValidIndex(Index) && SwitchPlates->PerInstanceSMCustomData[Index] > 0.5f;
+		if (Audio && bHeld != bWasHeld)
+		{
+			// Down with a click and a clunk; let go, a lighter click.
+			Audio->Play(ESokobanSound::Plate, bHeld ? 0.8f : 0.4f, bHeld ? 1.f : 1.25f);
+		}
+		SwitchPlates->SetCustomDataValue(Index, 0, bHeld ? 1.f : 0.f);
+		SwitchPlates->UpdateInstanceTransform(Index, SwitchPlateTransform(Cell, bHeld), true);
+	}
+	SwitchPlates->MarkRenderStateDirty();
+
+	const UWorld* World = GetWorld();
+	const double Now = World ? World->GetTimeSeconds() : 0.0;
+	for (int32 Index = 0; Index < Layout.Trapdoors.Num(); ++Index)
+	{
+		const bool bOpen = FSokobanRules::IsTrapdoorOpen(Layout, State, Layout.Trapdoors[Index]);
+		const float Target = bOpen ? 0.f : 1.f;
+		FTrapdoorSwing& Swing = TrapdoorSwings[Index];
+		if (bInstant)
+		{
+			Swing = FTrapdoorSwing{ Target, Target, -1.0 };
+			PoseTrapdoor(Index, Target);
+		}
+		else if (Swing.To != Target)
+		{
+			if (Audio)
+			{
+				Audio->Play(bOpen ? ESokobanSound::TrapdoorOpen : ESokobanSound::TrapdoorClose, bOpen ? 0.85f : 0.7f);
+			}
+			// Turn round from wherever the leaves are now.
+			const float Alpha = FMath::Clamp(static_cast<float>((Now - Swing.StartTime) / TrapdoorSwingTime), 0.f, 1.f);
+			Swing.From = Swing.StartTime < 0.0 ? Swing.To : SwingRaise(Swing.From, Swing.To, Alpha);
+			Swing.To = Target;
+			Swing.StartTime = Now;
+			SetActorTickEnabled(true);
+		}
+		TrapdoorRunes->SetCustomDataValue(Index * 2, 0, bOpen ? 1.f : 0.f);
+		TrapdoorRunes->SetCustomDataValue(Index * 2 + 1, 0, bOpen ? 1.f : 0.f);
+	}
+	TrapdoorLeaves->MarkRenderStateDirty();
+	TrapdoorBands->MarkRenderStateDirty();
+	TrapdoorRunes->MarkRenderStateDirty();
+}
+
+void ASokobanBoardView::PoseTrapdoor(int32 Index, float Raise)
+{
+	const float Unit = CellSize / 100.f;
+	const float Width = LeafWidth * CellSize;
+	const float Thickness = LeafThickness * CellSize;
+	const float Angle = FMath::DegreesToRadians(Raise * TrapdoorRaisedAngle);
+	const FVector Center = CellToWorld(Layout.Trapdoors[Index]);
+	for (int32 Leaf = 0; Leaf < 2; ++Leaf)
+	{
+		// The north leaf hangs on the north side of the pit, the south leaf on the south side. Lying flat they meet in
+		// the middle and cover the pit; raised, they stand up facing the camera (which looks north), the pit open
+		// between them.
+		const float Side = Leaf == 0 ? 1.f : -1.f;
+		const FTransform Hinge(FQuat(FVector::RightVector, Side * Angle), Center + FVector(Side * Width, 0.f, 0.f));
+		const float Middle = -Side * Width * 0.5f;
+		TrapdoorLeaves->UpdateInstanceTransform(Index * 2 + Leaf,
+			FTransform(FQuat::Identity, FVector(Middle, 0.f, -Thickness * 0.5f), FVector(LeafWidth * Unit, LeafLength * Unit, LeafThickness * Unit)) * Hinge, true);
+		for (int32 Band = 0; Band < 2; ++Band)
+		{
+			const float Along = (Band == 0 ? -0.27f : 0.27f) * CellSize;
+			TrapdoorBands->UpdateInstanceTransform(Index * 4 + Leaf * 2 + Band,
+				FTransform(FQuat::Identity, FVector(Middle, Along, -Thickness * 0.5f), FVector(0.94f * LeafWidth * Unit, 0.07f * Unit, (Thickness + 1.5f) / 100.f)) * Hinge, true);
+		}
+		TrapdoorRunes->UpdateInstanceTransform(Index * 2 + Leaf,
+			FTransform(FQuat::Identity, FVector(Middle, 0.f, 0.4f), FVector(0.15f * Unit, 0.15f * Unit, 0.012f)) * Hinge, true);
+	}
+}
+
+FTransform ASokobanBoardView::SwitchPlateTransform(const FIntPoint& Cell, bool bPressed) const
+{
+	// A 5 cm steel slab standing 5 cm proud of the floor in its frame, sinking while held down.
+	const float Unit = CellSize / 100.f;
+	const float Height = bPressed ? 2.5f - PlatePressDepth : 2.5f;
+	return FTransform(FRotator::ZeroRotator, CellToWorld(Cell) + FVector(0.f, 0.f, Height * Unit), FVector(0.6f * Unit, 0.6f * Unit, 0.05f * Unit));
 }
 
 FTransform ASokobanBoardView::GoalPlateTransform(const FIntPoint& Cell, bool bPressed) const
