@@ -95,13 +95,44 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Pieces")
 	TSubclassOf<ASokobanCrate> CrateClass;
 
-	/** Stone slab laid on every floor cell, scaled to fit the cell with a seam of grass around it. */
+	/** Courtyard tile laid on every floor cell, scaled to fit the cell with a seam of mortar around it. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
 	TObjectPtr<UStaticMesh> FloorMesh;
 
-	/** Island body and wall blocks: rock on the sides, grass on top. */
+	/** Dark stone showing in the seams between courtyard tiles. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
+	TObjectPtr<UMaterialInterface> MortarMaterial;
+
+	/** The rock the castle stands on: rock on the sides, grass on top. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
 	TObjectPtr<UMaterialInterface> TerrainMaterial;
+
+	/** Castle walls, merlons and towers: brick on the sides, stone on top. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Castle")
+	TObjectPtr<UMaterialInterface> CastleWallMaterial;
+
+	/** Conical roof on the corner towers. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Castle")
+	TObjectPtr<UStaticMesh> TowerRoofMesh;
+
+	/** Height of the outer walls behind and beside the courtyard. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Castle")
+	float CastleWallHeight = 150.f;
+
+	/** Height of the outer wall between the courtyard and the camera, kept low so it hides nothing. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Castle")
+	float FrontWallHeight = 30.f;
+
+	/** Side of the merlons along the top of the outer walls. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Castle")
+	float MerlonSize = 30.f;
+
+	/** Round towers on the castle's back corners. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Castle")
+	float TowerRadius = 70.f;
+
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Castle")
+	float TowerHeight = 320.f;
 
 	/** Sand-topped rock under the shallows around the island. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
@@ -110,23 +141,19 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
 	TObjectPtr<UMaterialInterface> WaterMaterial;
 
-	/** Material with Color / Roughness / Glow parameters, used by the goal markers. */
+	/** Brass pressure plate on every goal; its material reads per-instance custom data 0, which is 1 while pressed. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
-	TObjectPtr<UMaterialInterface> SolidMaterial;
+	TObjectPtr<UMaterialInterface> GoalPlateMaterial;
 
-	// Colours are linear (as the material sees them), so they look darker here than on screen.
+	/** The stone ring each plate is set in. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
-	FLinearColor GoalColor = FLinearColor(1.f, 0.62f, 0.04f);
+	TObjectPtr<UMaterialInterface> GoalSocketMaterial;
 
-	/** Emissive strength of the goal markers. */
+	/** How far a plate sinks under a crate. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
-	float GoalGlow = 1.5f;
+	float GoalPressDepth = 1.5f;
 
-	/** The stone ring each goal plate is set in. */
-	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
-	FLinearColor GoalSocketColor = FLinearColor(0.05f, 0.045f, 0.04f);
-
-	/** How far the interior wall blocks rise above the floor. */
+	/** How far the walls inside the courtyard rise above the floor. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
 	float WallHeight = 50.f;
 
@@ -149,9 +176,17 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
 	float RimWidth = 0.3f;
 
-	/** Grass, flowers, bushes and stones on top of the walls. */
+	/** Grass, flowers, bushes and stones on top of the walls inside the courtyard. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Dressing")
 	TArray<FSokobanDressing> WallDressing;
+
+	/** Ivy hanging from the castle walls into the courtyard. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Dressing")
+	TArray<FSokobanDressing> VineDressing;
+
+	/** Chance per courtyard-facing side of a castle wall block that ivy hangs there. */
+	UPROPERTY(EditAnywhere, Category = "Sokoban|Dressing")
+	float VineChance = 0.3f;
 
 	/** Pieces of WallDressing per wall block. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Dressing")
@@ -189,17 +224,21 @@ protected:
 
 private:
 	UInstancedStaticMeshComponent* CreateLayer(FName Name, UStaticMesh* Mesh);
-	void ColorLayer(UInstancedStaticMeshComponent* Layer, const FLinearColor& Color, float Glow);
 
 	/** Lays out island, floor slabs, walls, goals and shallows; pieces are spawned separately. */
 	void BuildTerrain(const FSokobanLevel& Level);
 	void ClearTerrain();
 
-	/**
-	 * Whether Cell is part of the island: floor, and walls enclosed by the level. Walls touching the outside
-	 * are drawn as open sea, so the coast follows the shape of the level the way water bounds a puzzle.
-	 */
+	/** Whether Cell is part of the island the castle stands on: anything inside the level's outline. */
 	bool IsIsland(const FIntPoint& Cell) const;
+
+	/** Walls touching the outside of the level (diagonals included): the castle's curtain wall. */
+	bool IsOuterWall(const FIntPoint& Cell) const;
+
+	/** Outer walls between the courtyard and the camera (which looks north from the south), kept low. */
+	bool IsFrontWall(const FIntPoint& Cell) const;
+
+	bool IsVoid(const FIntPoint& Cell) const { return Layout.GetTile(Cell) == ESokobanTile::Void; }
 
 	/** Chebyshev distance in cells from Cell to the island, or MaxDistance + 1 when farther than that. */
 	int32 DistanceToIsland(const FIntPoint& Cell, int32 MaxDistance) const;
@@ -219,7 +258,14 @@ private:
 	void ClearEditorPreview();
 
 	void ClearPieces();
+
+	/** Lights crates resting on goals and presses the plates under them. */
 	void UpdateCrateHighlights(const FSokobanBoardState& State, bool bInstant);
+
+	/** Sinks and lights the plates with a crate on them, raises the others. */
+	void PressGoalPlates(const FSokobanBoardState& State);
+
+	FTransform GoalPlateTransform(const FIntPoint& Cell, bool bPressed) const;
 
 	/** Body of the island under every non-void cell, reaching down into the sea. */
 	UPROPERTY(VisibleAnywhere, Category = "Sokoban")
@@ -236,6 +282,18 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Sokoban")
 	TObjectPtr<UInstancedStaticMeshComponent> GoalSockets;
+
+	UPROPERTY(VisibleAnywhere, Category = "Sokoban")
+	TObjectPtr<UInstancedStaticMeshComponent> MortarTiles;
+
+	UPROPERTY(VisibleAnywhere, Category = "Sokoban")
+	TObjectPtr<UInstancedStaticMeshComponent> Merlons;
+
+	UPROPERTY(VisibleAnywhere, Category = "Sokoban")
+	TObjectPtr<UInstancedStaticMeshComponent> TowerBodies;
+
+	UPROPERTY(VisibleAnywhere, Category = "Sokoban")
+	TObjectPtr<UInstancedStaticMeshComponent> TowerRoofs;
 
 	/** Underwater rock and sand around the island. */
 	UPROPERTY(VisibleAnywhere, Category = "Sokoban")
@@ -261,6 +319,9 @@ private:
 	TArray<TObjectPtr<ASokobanCrate>> Crates;
 
 	FSokobanLayout Layout;
+
+	/** The goal under each instance of GoalMarkers, in instance order. */
+	TArray<FIntPoint> GoalCells;
 
 	/** World position of the centre of cell (0, 0), the north-west corner. */
 	FVector Origin = FVector::ZeroVector;

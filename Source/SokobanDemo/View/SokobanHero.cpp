@@ -9,15 +9,13 @@
 
 ASokobanHero::ASokobanHero()
 {
-	// The strongman: the Superhero male from Quaternius' Universal Base Characters (CC0) with a beard and
-	// buzzed hair, animated with clips from the Universal Animation Library (CC0), all on one skeleton.
-	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BodyMesh(TEXT("/Game/Sokoban/Characters/Strongman/Superhero_Male_FullBody.Superhero_Male_FullBody"));
-	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BeardMesh(TEXT("/Game/Sokoban/Characters/Strongman/Hair/Hair_Beard.Hair_Beard"));
-	static ConstructorHelpers::FObjectFinder<USkeletalMesh> HairMesh(TEXT("/Game/Sokoban/Characters/Strongman/Hair/Hair_Buzzed.Hair_Buzzed"));
-	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> IdleClip(TEXT("/Game/Sokoban/Characters/Strongman/Animations/Idle_Loop.Idle_Loop"));
-	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> WalkClip(TEXT("/Game/Sokoban/Characters/Strongman/Animations/Jog_Fwd_Loop.Jog_Fwd_Loop"));
-	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> PushClip(TEXT("/Game/Sokoban/Characters/Strongman/Animations/Push_Loop.Push_Loop"));
-	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> VictoryClip(TEXT("/Game/Sokoban/Characters/Strongman/Animations/Dance_Loop.Dance_Loop"));
+	// The strongman is a fat cat: "Cat Pilot" by Tomcat94 (OpenGameArt, CC0), fattened and given Idle and
+	// Push clips next to its own Walk and Cheer (agent tools: make_fat_cat.py, then import_fat_cat.py).
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BodyMesh(TEXT("/Game/Sokoban/Characters/FatCat/FatCat.FatCat"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> IdleClip(TEXT("/Game/Sokoban/Characters/FatCat/Idle.Idle"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> WalkClip(TEXT("/Game/Sokoban/Characters/FatCat/Walk.Walk"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> PushClip(TEXT("/Game/Sokoban/Characters/FatCat/Push.Push"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> VictoryClip(TEXT("/Game/Sokoban/Characters/FatCat/Cheer.Cheer"));
 
 	Mesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("Mesh"));
 	Mesh->SetupAttachment(VisualRoot);
@@ -25,19 +23,11 @@ ASokobanHero::ASokobanHero()
 	Mesh->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 	// The model faces +Y; turn it so the actor's forward (+X) is the hero's front.
 	Mesh->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
-	// 1.82 m tall as imported: a bit over a cell high, so the broad build reads from the high camera.
-	Mesh->SetRelativeScale3D(FVector(0.72f));
+	// 2.56 m tall as authored: a little over a cell high, so the round little cat reads from the high camera.
+	Mesh->SetRelativeScale3D(FVector(0.46f));
 	if (BodyMesh.Succeeded())
 	{
 		Mesh->SetSkeletalMeshAsset(BodyMesh.Object);
-	}
-	if (BeardMesh.Succeeded())
-	{
-		AttachedParts.Add(BeardMesh.Object);
-	}
-	if (HairMesh.Succeeded())
-	{
-		AttachedParts.Add(HairMesh.Object);
 	}
 
 	if (IdleClip.Succeeded())
@@ -57,9 +47,10 @@ ASokobanHero::ASokobanHero()
 		ActionClips.Add(ESokobanHeroAction::Victory, VictoryClip.Object);
 	}
 	// A step takes a fraction of a second, so both cycles run faster than their natural pace.
-	ActionPlayRates.Add(ESokobanHeroAction::Walk, 1.4f);
-	ActionPlayRates.Add(ESokobanHeroAction::Push, 1.8f);
-	ActionReaches.Add(ESokobanHeroAction::Push, 16.f);
+	ActionPlayRates.Add(ESokobanHeroAction::Walk, 2.f);
+	ActionPlayRates.Add(ESokobanHeroAction::Push, 1.6f);
+	// Short arms: the whole cat leans into the crate.
+	ActionReaches.Add(ESokobanHeroAction::Push, 34.f);
 }
 
 void ASokobanHero::AddPartsTo(USkeletalMeshComponent* Body, EComponentCreationMethod CreationMethod) const

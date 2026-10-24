@@ -4,21 +4,22 @@
 
 | 资源 | 作者 | 授权 | 在项目中的位置 |
 |---|---|---|---|
-| Universal Base Characters（Superhero 男性体型，络腮胡与寸头发型） | Quaternius（quaternius.com） | CC0 1.0 | `Content/Sokoban/Characters/Strongman` |
-| Universal Animation Library（Idle、Walk、Jog、Push、Dance、Hit） | Quaternius | CC0 1.0 | `Content/Sokoban/Characters/Strongman/Animations` |
+| Cat Pilot (Rigged + Animated)（OpenGameArt） | Tomcat94 | CC0 1.0 | `Content/Sokoban/Characters/FatCat` |
+
+改动：用 Blender 脚本把身体改胖，新增 Idle、Push 两个动作；Walk 和 Cheer 来自原文件。
 
 ## 场景
 
 | 资源 | 作者 | 授权 | 在项目中的位置 |
 |---|---|---|---|
-| Stylized Nature MegaKit（石板、岩石、卵石、灌木、草、花、蘑菇、树及其贴图） | Quaternius | CC0 1.0 | `Content/Sokoban/Environment` |
-| Medieval Village MegaKit（木箱，WoodTrim 贴图，地形噪声贴图） | Quaternius | CC0 1.0 | `Content/Sokoban/Environment` |
+| Stylized Nature MegaKit（岩石、卵石、灌木、草、花、蘑菇、树及其贴图，地形噪声贴图） | Quaternius（quaternius.com） | CC0 1.0 | `Content/Sokoban/Environment` |
+| Medieval Village MegaKit（庭院石砖、圆塔尖顶、藤蔓、碎砖、木箱及其贴图） | Quaternius | CC0 1.0 | `Content/Sokoban/Environment` |
 
 CC0 不要求署名，这里仍然列出以示感谢。
 
 ## 项目自制
 
-- 材质：`Content/Sokoban/Materials` 下的 M_SokobanSolid、M_SokobanCharacter、M_SokobanProp、M_SokobanFoliage、M_SokobanTerrain、M_SokobanWater。
+- 材质：`Content/Sokoban/Materials` 下的 M_SokobanCharacter、M_SokobanProp、M_SokobanFoliage、M_SokobanTerrain、M_SokobanWater、M_SokobanGoalPlate、M_SokobanToon（卡通后期）、M_SokobanCloudShadows（云影灯光函数）。
 - 水面波纹法线贴图 T_WaterRipples_N：由脚本按正弦波叠加生成。
 
 ## 引擎自带内容

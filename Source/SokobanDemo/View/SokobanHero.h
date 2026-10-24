@@ -21,7 +21,7 @@ enum class ESokobanHeroAction : uint8
 	Victory
 };
 
-/** The playable hero: the strongman, who shoves a whole row of crates. */
+/** The playable hero: the strongman (a fat cat), who shoves a whole row of crates. */
 UCLASS()
 class SOKOBANDEMO_API ASokobanHero : public ASokobanPiece
 {
@@ -57,7 +57,7 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Sokoban")
 	TObjectPtr<USkeletalMeshComponent> Mesh;
 
-	/** Meshes skinned to the body's skeleton (beard, hair); they follow the body's pose. */
+	/** Meshes skinned to the body's skeleton (hats, hair and the like); they follow the body's pose. */
 	UPROPERTY(EditAnywhere, Category = "Sokoban|Look")
 	TArray<TObjectPtr<USkeletalMesh>> AttachedParts;
 

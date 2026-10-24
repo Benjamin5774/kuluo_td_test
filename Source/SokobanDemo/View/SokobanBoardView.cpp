@@ -10,7 +10,6 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
-#include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -46,22 +45,36 @@ ASokobanBoardView::ASokobanBoardView()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderMesh(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlaneMesh(TEXT("/Engine/BasicShapes/Plane.Plane"));
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> SolidMaterialAsset(TEXT("/Game/Sokoban/Materials/M_SokobanSolid.M_SokobanSolid"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> TerrainMaterialAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_Terrain.MI_Terrain"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ShelfMaterialAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_TerrainShelf.MI_TerrainShelf"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WaterMaterialAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_Water.MI_Water"));
-	SolidMaterial = SolidMaterialAsset.Object;
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> GoalPlateAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_GoalPlate.MI_GoalPlate"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> GoalSocketAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_GoalSocket.MI_GoalSocket"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> CastleWallAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_CastleWall.MI_CastleWall"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MortarAsset(TEXT("/Game/Sokoban/Environment/Materials/MI_Mortar.MI_Mortar"));
 	TerrainMaterial = TerrainMaterialAsset.Object;
 	ShelfMaterial = ShelfMaterialAsset.Object;
 	WaterMaterial = WaterMaterialAsset.Object;
-	FloorMesh = FindEnvironmentMesh(TEXT("RockPath_Square_Wide"));
+	GoalPlateMaterial = GoalPlateAsset.Object;
+	GoalSocketMaterial = GoalSocketAsset.Object;
+	CastleWallMaterial = CastleWallAsset.Object;
+	MortarMaterial = MortarAsset.Object;
+	// Courtyard tiles and tower roofs from the Quaternius Medieval Village MegaKit (CC0).
+	FloorMesh = FindEnvironmentMesh(TEXT("Floor_Brick"));
+	TowerRoofMesh = FindEnvironmentMesh(TEXT("Roof_Tower_RoundTiles"));
 
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	IslandTiles = CreateLayer(TEXT("IslandTiles"), CubeMesh.Object);
+	MortarTiles = CreateLayer(TEXT("MortarTiles"), CubeMesh.Object);
 	FloorTiles = CreateLayer(TEXT("FloorTiles"), FloorMesh);
 	WallTiles = CreateLayer(TEXT("WallTiles"), CubeMesh.Object);
+	Merlons = CreateLayer(TEXT("Merlons"), CubeMesh.Object);
+	TowerBodies = CreateLayer(TEXT("TowerBodies"), CylinderMesh.Object);
+	TowerRoofs = CreateLayer(TEXT("TowerRoofs"), TowerRoofMesh);
 	GoalSockets = CreateLayer(TEXT("GoalSockets"), CylinderMesh.Object);
 	GoalMarkers = CreateLayer(TEXT("GoalMarkers"), CylinderMesh.Object);
+	// Custom data 0: how pressed each plate is (the plate material glows with it).
+	GoalMarkers->NumCustomDataFloats = 1;
 	ShelfTiles = CreateLayer(TEXT("ShelfTiles"), CubeMesh.Object);
 
 	// A sea reaching past the edges of the high camera's view.
@@ -98,6 +111,10 @@ ASokobanBoardView::ASokobanBoardView()
 		MakeDressing(TEXT("Pebble_Round_1"), 0.5f, 0.85f),
 		MakeDressing(TEXT("Pebble_Round_2"), 0.5f, 0.85f),
 		MakeDressing(TEXT("Pebble_Square_1"), 0.5f, 0.8f),
+	};
+	VineDressing = {
+		MakeDressing(TEXT("Prop_Vine1"), 0.35f, 0.45f),
+		MakeDressing(TEXT("Prop_Vine4"), 0.55f, 0.7f),
 	};
 	RimDressing = {
 		MakeDressing(TEXT("Grass_Common_Short"), 0.18f, 0.26f, true),
@@ -165,19 +182,6 @@ void ASokobanBoardView::BeginPlay()
 	}
 	DressingLayers.Reset();
 	ClearEditorPreview();
-	ColorLayer(GoalSockets, GoalSocketColor, 0.f);
-	ColorLayer(GoalMarkers, GoalColor, GoalGlow);
-}
-
-void ASokobanBoardView::ColorLayer(UInstancedStaticMeshComponent* Layer, const FLinearColor& Color, float Glow)
-{
-	if (UMaterialInstanceDynamic* Material = Layer->CreateDynamicMaterialInstance(0, SolidMaterial))
-	{
-		Material->SetVectorParameterValue(TEXT("Color"), Color);
-		Material->SetScalarParameterValue(TEXT("Glow"), Glow);
-
-		UE_LOG(LogSokoban, Verbose, TEXT("%s uses %s, Color = %s"), *Layer->GetName(), *GetNameSafe(Material->Parent), *Material->K2_GetVectorParameterValue(TEXT("Color")).ToString());
-	}
 }
 
 void ASokobanBoardView::BuildLevel(const FSokobanLevel& Level)
@@ -210,10 +214,15 @@ void ASokobanBoardView::BuildLevel(const FSokobanLevel& Level)
 void ASokobanBoardView::ClearTerrain()
 {
 	IslandTiles->ClearInstances();
+	MortarTiles->ClearInstances();
 	FloorTiles->ClearInstances();
 	WallTiles->ClearInstances();
+	Merlons->ClearInstances();
+	TowerBodies->ClearInstances();
+	TowerRoofs->ClearInstances();
 	GoalSockets->ClearInstances();
 	GoalMarkers->ClearInstances();
+	GoalCells.Reset();
 	ShelfTiles->ClearInstances();
 	for (const TPair<TObjectPtr<UStaticMesh>, TObjectPtr<UInstancedStaticMeshComponent>>& Layer : DressingLayers)
 	{
@@ -232,9 +241,17 @@ void ASokobanBoardView::BuildTerrain(const FSokobanLevel& Level)
 	Origin = GetActorLocation() + FVector((Layout.Size.Y - 1) * 0.5f * CellSize, -(Layout.Size.X - 1) * 0.5f * CellSize, 0.f);
 
 	IslandTiles->SetMaterial(0, TerrainMaterial);
-	WallTiles->SetMaterial(0, TerrainMaterial);
+	MortarTiles->SetMaterial(0, MortarMaterial);
+	WallTiles->SetMaterial(0, CastleWallMaterial);
+	Merlons->SetMaterial(0, CastleWallMaterial);
+	TowerBodies->SetMaterial(0, CastleWallMaterial);
+	TowerRoofs->SetStaticMesh(TowerRoofMesh);
 	ShelfTiles->SetMaterial(0, ShelfMaterial);
+	GoalSockets->SetMaterial(0, GoalSocketMaterial);
+	GoalMarkers->SetMaterial(0, GoalPlateMaterial);
 	FloorTiles->SetStaticMesh(FloorMesh);
+	// The tile keeps its own material (maps saved by older builds carry a flat-colour override here).
+	FloorTiles->EmptyOverrideMaterials();
 	Water->SetMaterial(0, WaterMaterial);
 	Water->SetRelativeLocation(FVector(0.f, 0.f, WaterLevel));
 
@@ -242,11 +259,13 @@ void ASokobanBoardView::BuildTerrain(const FSokobanLevel& Level)
 	// Island, wall and shelf blocks fill whole cells so neighbours merge into one mass.
 	const float Unit = CellSize / 100.f;
 	const FVector IslandScale(Unit, Unit, (IslandTop - IslandBottom) / 100.f);
-	const FVector WallScale(Unit, Unit, (WallHeight - IslandTop) / 100.f);
 
-	// The slab is authored about two metres across: fit it into a cell, leaving a seam of grass around it.
+	// The tile is authored two metres across: fit it into a cell, leaving a seam of mortar around it.
 	const FBox Slab = FloorMesh ? FloorMesh->GetBoundingBox() : FBox(FVector(-50.f), FVector(50.f));
 	const FVector SlabScale(0.94f * CellSize / Slab.GetSize().X, 0.94f * CellSize / Slab.GetSize().Y, 0.55f);
+	const FBox Roof = TowerRoofMesh ? TowerRoofMesh->GetBoundingBox() : FBox(FVector(-50.f), FVector(50.f));
+	// Eaves overhanging the tower a little.
+	const float RoofScale = TowerRadius * 2.4f / Roof.GetSize().X;
 	FRandomStream Random(GetTypeHash(Level.Id));
 	FRandomStream ShelfRandom(GetTypeHash(Level.Id) + 2);
 	const float IslandZ = (IslandTop + IslandBottom) * 0.5f;
@@ -301,18 +320,56 @@ void ASokobanBoardView::BuildTerrain(const FSokobanLevel& Level)
 
 			if (Layout.GetTile(Cell) == ESokobanTile::Wall)
 			{
-				WallTiles->AddInstance(FTransform(FRotator::ZeroRotator, Center + FVector(0.f, 0.f, (WallHeight + IslandTop) * 0.5f), WallScale), true);
+				// The curtain wall stands tall behind and beside the courtyard; in front, and inside it, walls stay low.
+				const bool bCurtain = IsOuterWall(Cell) && !IsFrontWall(Cell);
+				const float Height = bCurtain ? CastleWallHeight : (IsOuterWall(Cell) ? FrontWallHeight : WallHeight);
+				WallTiles->AddInstance(FTransform(FRotator::ZeroRotator, Center + FVector(0.f, 0.f, (Height + IslandTop) * 0.5f), FVector(Unit, Unit, (Height - IslandTop) / 100.f)), true);
+				if (!bCurtain)
+				{
+					continue;
+				}
+
+				// Two merlons along every outward-facing edge.
+				for (ESokobanDirection Direction : SokobanGrid::AllDirections)
+				{
+					if (!IsVoid(Cell + SokobanGrid::Offset(Direction)))
+					{
+						continue;
+					}
+					const FVector Out = SokobanGrid::ToWorld(Direction);
+					const FVector Along(-Out.Y, Out.X, 0.f);
+					for (const float Side : { -0.25f, 0.25f })
+					{
+						const FVector Location = Center + Out * (0.5f * CellSize - MerlonSize * 0.5f) + Along * Side * CellSize + FVector(0.f, 0.f, CastleWallHeight + MerlonSize * 0.5f);
+						Merlons->AddInstance(FTransform(FRotator::ZeroRotator, Location, FVector(MerlonSize / 100.f)), true);
+					}
+				}
+
+				// A round tower on each back corner, roofed.
+				const bool bBackCorner = IsVoid(Cell + SokobanGrid::Offset(ESokobanDirection::North))
+					&& (IsVoid(Cell + SokobanGrid::Offset(ESokobanDirection::West)) || IsVoid(Cell + SokobanGrid::Offset(ESokobanDirection::East)));
+				if (bBackCorner)
+				{
+					TowerBodies->AddInstance(FTransform(FRotator::ZeroRotator, Center + FVector(0.f, 0.f, (TowerHeight + IslandTop) * 0.5f),
+						FVector(TowerRadius / 50.f, TowerRadius / 50.f, (TowerHeight - IslandTop) / 100.f)), true);
+					TowerRoofs->AddInstance(FTransform(FRotator(0.f, Random.FRandRange(0.f, 360.f), 0.f),
+						Center + FVector(0.f, 0.f, TowerHeight - 8.f - Roof.Min.Z * RoofScale), FVector(RoofScale)), true);
+				}
 				continue;
 			}
 
-			// Quarter turns, plus a hair of jitter, so neighbouring slabs don't repeat; the top sits flush with the floor.
-			const FRotator SlabRotation(0.f, 90.f * Random.RandRange(0, 3) + Random.FRandRange(-2.f, 2.f), 0.f);
+			// Mortar under the tile, filling the seam between neighbouring tiles.
+			MortarTiles->AddInstance(FTransform(FRotator::ZeroRotator, Center + FVector(0.f, 0.f, (IslandTop - 0.5f) * 0.5f), FVector(Unit, Unit, (-0.5f - IslandTop) / 100.f)), true);
+
+			// Quarter turns, plus a hair of jitter, so neighbouring tiles don't repeat; the top sits flush with the floor.
+			const FRotator SlabRotation(0.f, 90.f * Random.RandRange(0, 3) + Random.FRandRange(-1.f, 1.f), 0.f);
 			FloorTiles->AddInstance(FTransform(SlabRotation, Center - FVector(0.f, 0.f, Slab.Max.Z * SlabScale.Z), SlabScale), true);
 			if (Layout.IsGoal(Cell))
 			{
 				// A gold plate set in a dark stone ring.
 				GoalSockets->AddInstance(FTransform(FRotator::ZeroRotator, Center + FVector(0.f, 0.f, 0.5f * Unit), FVector(0.74f * Unit, 0.74f * Unit, 0.03f * Unit)), true);
-				GoalMarkers->AddInstance(FTransform(FRotator::ZeroRotator, Center + FVector(0.f, 0.f, 1.5f * Unit), FVector(0.52f * Unit, 0.52f * Unit, 0.03f * Unit)), true);
+				GoalMarkers->AddInstance(GoalPlateTransform(Cell, false), true);
+				GoalCells.Add(Cell);
 			}
 		}
 	}
@@ -322,26 +379,36 @@ void ASokobanBoardView::BuildTerrain(const FSokobanLevel& Level)
 
 bool ASokobanBoardView::IsIsland(const FIntPoint& Cell) const
 {
-	switch (Layout.GetTile(Cell))
+	return !IsVoid(Cell);
+}
+
+bool ASokobanBoardView::IsOuterWall(const FIntPoint& Cell) const
+{
+	if (Layout.GetTile(Cell) != ESokobanTile::Wall)
 	{
-	case ESokobanTile::Floor:
-		return true;
-	case ESokobanTile::Wall:
-		for (int32 DY = -1; DY <= 1; ++DY)
-		{
-			for (int32 DX = -1; DX <= 1; ++DX)
-			{
-				// Cells outside the layout count as void too.
-				if (Layout.GetTile(Cell + FIntPoint(DX, DY)) == ESokobanTile::Void)
-				{
-					return false;
-				}
-			}
-		}
-		return true;
-	default:
 		return false;
 	}
+	for (int32 DY = -1; DY <= 1; ++DY)
+	{
+		for (int32 DX = -1; DX <= 1; ++DX)
+		{
+			// Cells outside the layout count as void too.
+			if (IsVoid(Cell + FIntPoint(DX, DY)))
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+bool ASokobanBoardView::IsFrontWall(const FIntPoint& Cell) const
+{
+	const FIntPoint North = Cell + SokobanGrid::Offset(ESokobanDirection::North);
+	const FIntPoint South = Cell + SokobanGrid::Offset(ESokobanDirection::South);
+	// Directly in front of the courtyard, or a front corner (open to the south, courtyard diagonally behind).
+	return Layout.IsFloor(North)
+		|| (IsVoid(South) && (Layout.IsFloor(North + FIntPoint(1, 0)) || Layout.IsFloor(North + FIntPoint(-1, 0))));
 }
 
 int32 ASokobanBoardView::DistanceToIsland(const FIntPoint& Cell, int32 MaxDistance) const
@@ -378,7 +445,7 @@ void ASokobanBoardView::BuildDressing(const FSokobanLevel& Level)
 			}
 			const FVector Center = CellToWorld(Cell);
 
-			if (Layout.GetTile(Cell) == ESokobanTile::Wall)
+			if (Layout.GetTile(Cell) == ESokobanTile::Wall && !IsOuterWall(Cell))
 			{
 				// The camera looks north from the south: something tall here would hide the floor cell north of it.
 				const bool bHidesFloor = Layout.IsFloor(Cell + SokobanGrid::Offset(ESokobanDirection::North));
@@ -388,6 +455,27 @@ void ASokobanBoardView::BuildDressing(const FSokobanLevel& Level)
 					{
 						const FVector Jitter(Random.FRandRange(-0.32f, 0.32f) * CellSize, Random.FRandRange(-0.32f, 0.32f) * CellSize, WallHeight);
 						AddDressing(*Dressing, Center + Jitter, Random);
+					}
+				}
+			}
+			else if (Layout.GetTile(Cell) == ESokobanTile::Wall && !IsFrontWall(Cell))
+			{
+				// Ivy hanging from the top of the curtain wall down its courtyard side.
+				for (ESokobanDirection Direction : SokobanGrid::AllDirections)
+				{
+					if (!Layout.IsFloor(Cell + SokobanGrid::Offset(Direction)) || Random.FRand() >= VineChance)
+					{
+						continue;
+					}
+					if (const FSokobanDressing* Vine = PickDressing(VineDressing, false, Random))
+					{
+						const FVector In = SokobanGrid::ToWorld(Direction);
+						const FVector Along(-In.Y, In.X, 0.f);
+						const FVector Location = Center + In * (0.5f * CellSize + 1.f) + Along * Random.FRandRange(-0.25f, 0.25f) * CellSize + FVector(0.f, 0.f, CastleWallHeight - 4.f);
+						// The vine is a sheet facing its local +Y: turn that towards the courtyard.
+						const FRotator Facing(0.f, FMath::RadiansToDegrees(FMath::Atan2(-In.X, In.Y)), 0.f);
+						const float Scale = Random.FRandRange(Vine->MinScale, Vine->MaxScale);
+						DressingLayer(Vine->Mesh)->AddInstance(FTransform(Facing, Location, FVector(Scale)), true);
 					}
 				}
 			}
@@ -519,8 +607,7 @@ void ASokobanBoardView::BuildEditorPreview()
 
 	const FSokobanLevel& Level = Levels[PreviewLevelIndex];
 	BuildTerrain(Level);
-	ColorLayer(GoalSockets, GoalSocketColor, 0.f);
-	ColorLayer(GoalMarkers, GoalColor, GoalGlow);
+	PressGoalPlates(Level.InitialState);
 
 	// Stand-ins look like the real pieces: same meshes and offsets, taken from the piece classes' defaults.
 	if (const ASokobanCrate* Crate = CrateClass ? CrateClass->GetDefaultObject<ASokobanCrate>() : nullptr)
@@ -728,4 +815,24 @@ void ASokobanBoardView::UpdateCrateHighlights(const FSokobanBoardState& State, b
 	{
 		Crates[Index]->SetOnGoal(Layout.IsGoal(State.Crates[Index]), bInstant);
 	}
+	PressGoalPlates(State);
+}
+
+void ASokobanBoardView::PressGoalPlates(const FSokobanBoardState& State)
+{
+	for (int32 Index = 0; Index < GoalCells.Num(); ++Index)
+	{
+		const bool bPressed = State.FindCrateAt(GoalCells[Index]) != INDEX_NONE;
+		GoalMarkers->SetCustomDataValue(Index, 0, bPressed ? 1.f : 0.f);
+		GoalMarkers->UpdateInstanceTransform(Index, GoalPlateTransform(GoalCells[Index], bPressed), true);
+	}
+	GoalMarkers->MarkRenderStateDirty();
+}
+
+FTransform ASokobanBoardView::GoalPlateTransform(const FIntPoint& Cell, bool bPressed) const
+{
+	// A 4 cm brass disc standing 1.5 cm proud of its stone ring, flush with it once pressed.
+	const float Unit = CellSize / 100.f;
+	const float Height = bPressed ? 1.5f - GoalPressDepth : 1.5f;
+	return FTransform(FRotator::ZeroRotator, CellToWorld(Cell) + FVector(0.f, 0.f, Height * Unit), FVector(0.56f * Unit, 0.56f * Unit, 0.04f * Unit));
 }
