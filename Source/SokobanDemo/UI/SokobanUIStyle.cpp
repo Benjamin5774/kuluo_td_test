@@ -14,14 +14,14 @@
 
 namespace
 {
-	/** An image from /Game/Sokoban/UI (drawn by the agent tools make_star_textures.py and make_ui_textures.py), loaded once. */
-	UTexture2D* UITexture(const TCHAR* Name)
+	/** An image from /Game/Sokoban/UI, loaded once; bQuiet when it may well not exist. */
+	UTexture2D* UITexture(const TCHAR* Name, bool bQuiet = false)
 	{
 		static TMap<FString, TWeakObjectPtr<UTexture2D>> Loaded;
 		TWeakObjectPtr<UTexture2D>& Texture = Loaded.FindOrAdd(Name);
 		if (!Texture.IsValid())
 		{
-			Texture = LoadObject<UTexture2D>(nullptr, *FString::Printf(TEXT("/Game/Sokoban/UI/%s.%s"), Name, Name));
+			Texture = LoadObject<UTexture2D>(nullptr, *FString::Printf(TEXT("/Game/Sokoban/UI/%s.%s"), Name, Name), nullptr, bQuiet ? LOAD_NoWarn | LOAD_Quiet : LOAD_None);
 		}
 		return Texture.Get();
 	}
@@ -169,7 +169,7 @@ FSlateBrush SokobanStyle::CircleBrush(const FLinearColor& Fill, float Size)
 
 FSlateBrush SokobanStyle::IconBrush(const TCHAR* Name, float Size)
 {
-	UTexture2D* Texture = UITexture(*FString::Printf(TEXT("T_Icon%s"), Name));
+	UTexture2D* Texture = UITexture(*FString::Printf(TEXT("T_Icon%s"), Name), true);
 	if (!Texture)
 	{
 		Texture = UITexture(*FString::Printf(TEXT("T_Brush%s"), Name));

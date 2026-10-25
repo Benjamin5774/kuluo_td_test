@@ -15,8 +15,7 @@ static TAutoConsoleVariable<bool> CVarTraceHero(TEXT("Sokoban.TraceHero"), false
 
 ASokobanHero::ASokobanHero()
 {
-	// The strongman is a chubby ginger cat, modelled, rigged and animated for this project
-	// (agent tools: make_cartoon_cat.py in Blender, then import_ginger_cat.py).
+	// The strongman is a chubby ginger cat, modelled, rigged and animated in Blender for this project.
 	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BodyMesh(TEXT("/Game/Sokoban/Characters/GingerCat/GingerCat.GingerCat"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> IdleClip(TEXT("/Game/Sokoban/Characters/GingerCat/Idle.Idle"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequenceBase> WalkClip(TEXT("/Game/Sokoban/Characters/GingerCat/Walk.Walk"));

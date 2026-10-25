@@ -20,15 +20,15 @@ namespace
 	const FVector DuneCenter(-1040.f, 20.f, -72.f);
 	const FVector DuneRadii(330.f, 600.f, 40.f);
 
-	UStaticMesh* FindMesh(const TCHAR* Path)
+	UStaticMesh* FindStageMesh(const TCHAR* Path)
 	{
 		ConstructorHelpers::FObjectFinder<UStaticMesh> Finder(Path);
 		return Finder.Object;
 	}
 
-	UStaticMesh* FindEnvironmentMesh(const TCHAR* Name)
+	UStaticMesh* FindStageEnvironmentMesh(const TCHAR* Name)
 	{
-		return FindMesh(*FString::Printf(TEXT("/Game/Sokoban/Environment/Meshes/%s.%s"), Name, Name));
+		return FindStageMesh(*FString::Printf(TEXT("/Game/Sokoban/Environment/Meshes/%s.%s"), Name, Name));
 	}
 }
 
@@ -52,7 +52,7 @@ ASokobanTitleStage::ASokobanTitleStage()
 	SandMaterial = SandAsset.Object;
 
 	// The sandbar: two flattened domes rising out of the sea, which lies 60 cm below the castle floor.
-	UStaticMesh* Sphere = FindMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	UStaticMesh* Sphere = FindStageMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	AddProp(TEXT("Dune"), Sphere, DuneCenter, 0.f, DuneRadii / 50.f)->SetMaterial(0, SandMaterial);
 	AddProp(TEXT("Spit"), Sphere, FVector(-800.f, 350.f, -84.f), 30.f, FVector(4.2f, 6.f, 0.8f))->SetMaterial(0, SandMaterial);
 
@@ -60,18 +60,18 @@ ASokobanTitleStage::ASokobanTitleStage()
 	// plank door in a brick frame, from the Quaternius Medieval Village MegaKit (CC0), both turned to face the beach.
 	// The door hangs from its left edge, so it sits half its width aside to fill the frame, set back a little in it.
 	constexpr float GateScale = 0.65f;
-	AddProp(TEXT("GateFrame"), FindEnvironmentMesh(TEXT("DoorFrame_Round_Brick")), FVector(-300.f, 0.f, 0.f), 90.f, FVector(GateScale));
-	AddProp(TEXT("GateDoor"), FindEnvironmentMesh(TEXT("Door_2_Round")), FVector(-298.f, -51.5f * GateScale, 0.f), 90.f, FVector(GateScale));
+	AddProp(TEXT("GateFrame"), FindStageEnvironmentMesh(TEXT("DoorFrame_Round_Brick")), FVector(-300.f, 0.f, 0.f), 90.f, FVector(GateScale));
+	AddProp(TEXT("GateDoor"), FindStageEnvironmentMesh(TEXT("Door_2_Round")), FVector(-298.f, -51.5f * GateScale, 0.f), 90.f, FVector(GateScale));
 
 	// Dressing from the Quaternius Stylized Nature MegaKit (CC0): rocks half buried in the sand, grass along its crest.
-	AddProp(TEXT("RockWest"), FindEnvironmentMesh(TEXT("Rock_Medium_2")), FVector(-1190.f, -450.f, -54.f), 40.f, FVector(0.42f));
-	AddProp(TEXT("RockEast"), FindEnvironmentMesh(TEXT("Rock_Medium_3")), FVector(-1240.f, 440.f, -60.f), 160.f, FVector(0.34f));
-	AddProp(TEXT("Pebbles"), FindEnvironmentMesh(TEXT("Pebble_Round_2")), FVector(-1190.f, 150.f, -42.f), 10.f, FVector(0.7f));
-	UStaticMesh* Grass = FindEnvironmentMesh(TEXT("Grass_Common_Short"));
+	AddProp(TEXT("RockWest"), FindStageEnvironmentMesh(TEXT("Rock_Medium_2")), FVector(-1190.f, -450.f, -54.f), 40.f, FVector(0.42f));
+	AddProp(TEXT("RockEast"), FindStageEnvironmentMesh(TEXT("Rock_Medium_3")), FVector(-1240.f, 440.f, -60.f), 160.f, FVector(0.34f));
+	AddProp(TEXT("Pebbles"), FindStageEnvironmentMesh(TEXT("Pebble_Round_2")), FVector(-1190.f, 150.f, -42.f), 10.f, FVector(0.7f));
+	UStaticMesh* Grass = FindStageEnvironmentMesh(TEXT("Grass_Common_Short"));
 	AddProp(TEXT("GrassA"), Grass, FVector(-860.f, -160.f, -42.f), 0.f, FVector(0.3f));
 	AddProp(TEXT("GrassB"), Grass, FVector(-880.f, 110.f, -40.f), 70.f, FVector(0.26f));
-	AddProp(TEXT("GrassC"), FindEnvironmentMesh(TEXT("Grass_Wispy_Short")), FVector(-830.f, 330.f, -46.f), 140.f, FVector(0.3f));
-	AddProp(TEXT("Flowers"), FindEnvironmentMesh(TEXT("Bush_Common_Flowers")), FVector(-870.f, -360.f, -50.f), 20.f, FVector(0.36f));
+	AddProp(TEXT("GrassC"), FindStageEnvironmentMesh(TEXT("Grass_Wispy_Short")), FVector(-830.f, 330.f, -46.f), 140.f, FVector(0.3f));
+	AddProp(TEXT("Flowers"), FindStageEnvironmentMesh(TEXT("Bush_Common_Flowers")), FVector(-870.f, -360.f, -50.f), 20.f, FVector(0.36f));
 }
 
 UStaticMeshComponent* ASokobanTitleStage::AddProp(FName Name, UStaticMesh* Mesh, const FVector& Location, float PropYaw, const FVector& Scale)

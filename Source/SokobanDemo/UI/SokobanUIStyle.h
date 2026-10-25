@@ -31,8 +31,8 @@ enum class ESokobanButtonTone : uint8
 
 /**
  * Shared look of the game's UI, built in code so no widget assets are needed: chunky cartoon shapes with thick ink
- * outlines on paper (textures drawn by the agent tool make_ui_textures.py), set in Haidao Sans, the game's subset of
- * Source Han Sans (make_ui_fonts.py).
+ * outlines on paper (the T_UI* textures in /Game/Sokoban/UI), set in Haidao Sans, the game's subset of Source Han
+ * Sans (see Licenses/HaidaoSans-OFL.txt).
  */
 namespace SokobanStyle
 {

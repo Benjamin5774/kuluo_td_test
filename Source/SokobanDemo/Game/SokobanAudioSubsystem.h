@@ -51,8 +51,8 @@ struct FSokobanSoundTakes
 /**
  * The game's sound: music fading between the title and the game, the sea underneath, and effects. An effect plays a
  * little differently every time (another take where there are several, pitch and level nudged), so repeats don't
- * sound mechanical. Sounds are the assets in /Game/Sokoban/Audio, found by name (see import_audio.py), so any of
- * them can be replaced by a file of the same name; a missing one is simply silent.
+ * sound mechanical. Sounds are the assets in /Game/Sokoban/Audio, found by name, so any of them can be replaced by
+ * an asset of the same name; a missing one is simply silent.
  */
 UCLASS()
 class SOKOBANDEMO_API USokobanAudioSubsystem : public UGameInstanceSubsystem
